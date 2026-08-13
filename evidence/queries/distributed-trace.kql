@@ -1,0 +1,15 @@
+let evidence_trace_id = "aa0c88bbd5e263bc7688bdffdc05ca86";
+union (requests | extend signal_type = "request"),
+      (dependencies | extend signal_type = "dependency")
+| where operation_Id == evidence_trace_id
+| project
+    timestamp,
+    signal_type,
+    cloud_RoleName,
+    name,
+    span_id = id,
+    parent_span_id = operation_ParentId,
+    resultCode,
+    success,
+    trace_id = operation_Id
+| order by timestamp asc

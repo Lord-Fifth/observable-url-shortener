@@ -113,3 +113,79 @@ def test_cosmos_backend_requires_endpoint(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("COSMOS_ENDPOINT", raising=False)
     with pytest.raises(RuntimeError, match="COSMOS_ENDPOINT"):
         Settings.from_env()
+
+
+def test_azure_monitor_configuration_uses_explicit_managed_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection_string = (
+        "InstrumentationKey=00000000-0000-0000-0000-000000000000;"
+        "IngestionEndpoint=https://australiaeast-0.in.applicationinsights.azure.com/"
+    )
+    monkeypatch.setenv("AZURE_MONITOR_ENABLED", "true")
+    monkeypatch.setenv("APPLICATIONINSIGHTS_CONNECTION_STRING", connection_string)
+    monkeypatch.setenv("AZURE_CLIENT_ID", "22222222-2222-2222-2222-222222222222")
+
+    settings = Settings.from_env()
+
+    assert settings.azure_monitor_enabled is True
+    assert settings.application_insights_connection_string == connection_string
+    assert settings.azure_client_id == "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.mark.parametrize(
+    ("environment", "message"),
+    [
+        ({"AZURE_MONITOR_ENABLED": "maybe"}, "must be true or false"),
+        ({"AZURE_MONITOR_ENABLED": "true"}, "requires"),
+        (
+            {
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": (
+                    "InstrumentationKey=00000000-0000-0000-0000-000000000000;"
+                    "IngestionEndpoint=https://example.test/"
+                )
+            },
+            "requires AZURE_MONITOR_ENABLED",
+        ),
+        (
+            {
+                "AZURE_MONITOR_ENABLED": "true",
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": (
+                    "InstrumentationKey=00000000-0000-0000-0000-000000000000;"
+                    "IngestionEndpoint=https://example.test/"
+                ),
+                "AZURE_CLIENT_ID": "not-a-uuid",
+            },
+            "must be a UUID",
+        ),
+        (
+            {
+                "AZURE_MONITOR_ENABLED": "true",
+                "APPLICATIONINSIGHTS_CONNECTION_STRING": (
+                    "InstrumentationKey=00000000-0000-0000-0000-000000000000;"
+                    "IngestionEndpoint=https://example.test/"
+                ),
+                "AZURE_CLIENT_ID": "22222222-2222-2222-2222-222222222222",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector.test:4318",
+            },
+            "mutually exclusive",
+        ),
+    ],
+)
+def test_invalid_azure_monitor_configuration_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    environment: dict[str, str],
+    message: str,
+) -> None:
+    for name in (
+        "AZURE_MONITOR_ENABLED",
+        "APPLICATIONINSIGHTS_CONNECTION_STRING",
+        "AZURE_CLIENT_ID",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(RuntimeError, match=message):
+        Settings.from_env()

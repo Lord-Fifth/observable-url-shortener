@@ -1,0 +1,15 @@
+let evidence_correlation_id = "azure-smoke-ef8c5d5a-80cb-4a90-bf7b-1290ea79ebfb";
+ContainerAppConsoleLogs_CL
+| where TimeGenerated > ago(24h)
+| extend payload = parse_json(Log_s)
+| where tostring(payload.correlation_id) == evidence_correlation_id
+| project
+    timestamp = todatetime(payload.timestamp),
+    service = tostring(payload.service),
+    event = tostring(payload.event),
+    correlation_id = tostring(payload.correlation_id),
+    trace_id = tostring(payload.trace_id),
+    span_id = tostring(payload.span_id),
+    status_code = toint(payload.status_code),
+    revision = RevisionName_s
+| order by timestamp asc

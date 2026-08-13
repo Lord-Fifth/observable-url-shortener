@@ -4,6 +4,7 @@ provider "azurerm" {
   resource_providers_to_register = [
     "Microsoft.App",
     "Microsoft.DocumentDB",
+    "Microsoft.Insights",
     "Microsoft.OperationalInsights",
   ]
 

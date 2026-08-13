@@ -1,0 +1,5 @@
+customMetrics
+| where timestamp > ago(24h)
+| where name == "url_shortener.http.server.errors"
+| summarize Errors = sum(valueSum) by bin(timestamp, 5m), cloud_RoleName
+| order by timestamp asc

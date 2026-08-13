@@ -20,6 +20,12 @@ part of the service phases.
 - Azure Container Apps, Cosmos DB, Terraform, public GHCR, OpenTelemetry, and Azure-native
   observability are selected architectural decisions. Do not silently change one; document a
   technical reason first.
+- Production JSON stdout flows through the Container Apps Environment to one Log Analytics
+  workspace. Production OTel traces and explicit RED metrics use direct Azure Monitor exporters
+  to one workspace-based Application Insights resource; do not add a second cloud backend.
+- Both existing user-assigned identities have `Monitoring Metrics Publisher` at Application
+  Insights scope and authenticate telemetry with `AZURE_CLIENT_ID`. Keep local authentication
+  disabled and never add telemetry API keys or client secrets.
 - Propagate one exact `X-Correlation-ID` across the full HTTP path and expose it to later logging
   and tracing through request context.
 - Keep correlation IDs and OpenTelemetry trace IDs distinct. Enrich logs only from real current
@@ -72,20 +78,32 @@ Cosmos keys, connection strings, client secrets, or registry credentials belong 
 configuration. Shortener Cosmos data-plane access is scoped only to `url_mappings`; resolver
 access is scoped only to `redirect_events`. Resolver still reads mappings exclusively through
 `http://<shortener-app-name>` Container Apps service discovery. Both apps scale to zero with
-`min_replicas=0`. Phase 5 owns Azure-native logs, traces, metrics, dashboard, alerts, and evidence.
+`min_replicas=0`.
+
+Phase 5 adds one 30-day `PerGB2018` Log Analytics workspace, one workspace-based Application
+Insights resource with a 1 GB/day cap and 100% assessment sampling, explicit Azure Monitor trace
+and metric exporters, a six-query production workbook, and an enabled scheduled error query.
+Container Apps stdout remains the only production log export path. Prometheus stays active in all
+modes; local Docker remains on the OTLP Collector, while Azure and OTLP remote exporters are
+mutually exclusive. Azure's custom histogram representation supports aggregate average/max, not a
+defensible p95. Preserve the dashboard -> service/operation -> distributed trace -> correlated
+JSON log investigation workflow. Managed Grafana and the Container Apps managed OTel agent are
+not part of this architecture.
 
 The AzureRM provider must keep explicit narrow registration for `Microsoft.App`,
-`Microsoft.DocumentDB`, and `Microsoft.OperationalInsights`; do not replace it with broad provider
-registration or portal/CLI click-ops. Both runtime manifests must retain a pinned `aiohttp` because
-the asynchronous Azure Identity and Cosmos clients require that transport. Production-image checks
-must exercise those imports inside Linux images. Keep each app's `AZURE_CLIENT_ID` wired to the
-same user-assigned identity attached to that app, and keep the Consumption workload profile
+`Microsoft.DocumentDB`, `Microsoft.Insights`, and `Microsoft.OperationalInsights`; do not replace
+it with broad provider registration or portal/CLI click-ops. Both runtime manifests must retain a
+pinned `aiohttp` because the asynchronous Azure Identity and Cosmos clients require that transport,
+plus the explicit Azure Monitor exporter compatible with the pinned OTel SDK. Production-image
+checks must exercise those imports inside Linux images. Keep each app's `AZURE_CLIENT_ID` wired to
+the same user-assigned identity attached to that app, and keep the Consumption workload profile
 explicit so provider refreshes do not introduce unrelated drift.
 
-Until a later explicit phase, do not add Azure-specific telemetry exporters, dashboards, alerts,
-GitHub Actions, Redis, Service Bus, Kubernetes, authentication, a UI, or Assessment Part 1. Do not
-introduce GCP, Cloud Run, Firestore, ACR, AKS, App Service, VNet, private endpoints, API Management,
-Front Door, or other resources outside the Phase 4 Terraform root.
+Until a later explicit phase, do not add another telemetry backend, managed Grafana, an Azure
+hosted OTel Collector, GitHub Actions, Redis, Service Bus, Kubernetes, authentication, a UI, or
+Assessment Part 1. Do not introduce GCP, Cloud Run, Firestore, ACR, AKS, App Service, VNet, private
+endpoints, API Management, Front Door, or other resources outside the existing Terraform root.
+Authenticated portal screenshots remain human work and must never be claimed without real files.
 
 Do not commit, push, create a repository, store credentials, or modify global Python installations
 unless the user explicitly changes scope.

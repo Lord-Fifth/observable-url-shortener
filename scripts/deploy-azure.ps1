@@ -131,7 +131,7 @@ if (-not $ImageTag) {
     finally {
         Remove-Item -LiteralPath $fingerprintFile -Force
     }
-    $ImageTag = "phase4-$($snapshotHash.Substring(0, 12))"
+    $ImageTag = "phase5-$($snapshotHash.Substring(0, 12))"
 }
 if ($ImageTag -notmatch "^[0-9a-z][0-9a-z._-]{6,127}$") {
     throw "ImageTag must be a lowercase immutable container tag."
@@ -158,7 +158,7 @@ if (-not (Test-PublicGhcrImage $shortenerImage) -or -not (Test-PublicGhcrImage $
 }
 
 Invoke-Native terraform "-chdir=$infraDirectory" init
-$planName = "phase4.tfplan"
+$planName = "phase5.tfplan"
 Invoke-Native terraform "-chdir=$infraDirectory" plan -out=$planName "-var=image_tag=$ImageTag" "-var=location=$Location"
 Invoke-Native $python (Join-Path $PSScriptRoot "validate-terraform-plan.py") (Join-Path $infraDirectory $planName) --infra-directory $infraDirectory
 Invoke-Native terraform "-chdir=$infraDirectory" apply $planName

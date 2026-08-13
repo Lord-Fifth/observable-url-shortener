@@ -1,9 +1,9 @@
 # Observable URL Shortener
 
-Phase 4 of Assessment Part 2 implements a deliberately small, observable two-service URL
+Phase 5 of Assessment Part 2 implements a deliberately small, observable two-service URL
 shortener. The services communicate only through HTTP, are independently containerised, export
-portable OpenTelemetry signals locally, and have a Terraform-managed Azure deployment path with
-durable Cosmos DB persistence.
+portable OpenTelemetry signals, and run in a Terraform-managed Azure deployment with durable
+Cosmos DB persistence and Azure-native production observability.
 
 ## Architecture
 
@@ -132,6 +132,9 @@ separate application contract.
 
 Trace and metric export are deliberately outside the business critical path. If the Collector is
 unavailable, export errors may be logged, but URL creation and resolution continue normally.
+Azure and local remote exporters are mutually exclusive: Compose selects OTLP, Azure selects the
+explicit Azure Monitor exporters, and `/metrics` remains available in either mode. Merely
+installing the Azure packages does not cause local authentication attempts.
 
 ## Architecture decisions
 
@@ -164,9 +167,10 @@ Official FastAPI and instance-scoped HTTPX instrumentation create spans and prop
 context. Each service owns its providers and exporters in FastAPI lifespan, uses explicit RED
 instruments with low-cardinality labels, and exposes a custom Prometheus registry. FastAPI's
 automatic meter provider is no-op to avoid duplicate HTTP metric families. Compose exports OTLP
-HTTP to a minimal pinned Collector; later cloud work can replace the backend without rewriting
-business instrumentation. The cost is a small intentional telemetry-module duplication so each
-service remains independently buildable.
+HTTP to a minimal pinned Collector. Azure selects explicit Azure Monitor trace and metric exporters
+on those same providers, authenticated with the service's existing managed identity. This avoids
+auto-configuration replacing providers or duplicating instrumentation. The cost is a small
+intentional telemetry-module duplication so each service remains independently buildable.
 
 ### ADR-005: Deploy to Azure Container Apps with secretless, narrow data access
 
@@ -188,24 +192,30 @@ Internet -> shortener Container App -> managed identity -> Cosmos url_mappings
 Internet -> resolver Container App  -> managed identity -> Cosmos redirect_events
                     |
                     +-> http://<shortener-app-name> -> shortener internal API
+
+Container stdout/stderr -> Container Apps Environment -> Log Analytics
+OTel traces + RED metrics -> managed identity -> shared Application Insights
+                                              -> Terraform workbook + error alert
 ```
 
 One free-tier Cosmos DB for NoSQL account contains one database with 1000 RU/s provisioned shared
 throughput, capped at 1000 RU/s account-wide. Neither container has dedicated throughput. It is
 single-region, non-serverless, has no analytical store or dedicated gateway, and disables local
 key authentication. Container Apps use 0.25 CPU/0.5 GiB, `min_replicas=0`, `max_replicas=2`, and
-separate identities. Azure telemetry export stays disabled until Phase 5; JSON stdout and portable
-instrumentation remain intact.
+separate identities. The same identities have `Monitoring Metrics Publisher` only at the shared
+Application Insights resource. Application Insights local ingestion authentication is disabled;
+its connection string is non-secret routing metadata, while Entra managed identity authenticates
+publication.
 
 Local runs default to `REPOSITORY_BACKEND=memory`. Terraform sets `cosmos` plus non-secret Cosmos
 resource names and service-specific `AZURE_CLIENT_ID` values in Azure.
 
 ## Azure deployment
 
-The AzureRM provider explicitly registers only `Microsoft.App`, `Microsoft.DocumentDB`, and
-`Microsoft.OperationalInsights`; provider registration is therefore reproducible without portal
-or Azure CLI registration. The Consumption workload profile is also explicit in Terraform so a
-refresh does not propose removing Azure-normalised defaults.
+The AzureRM provider explicitly registers only `Microsoft.App`, `Microsoft.DocumentDB`,
+`Microsoft.Insights`, and `Microsoft.OperationalInsights`; provider registration is therefore
+reproducible without portal or Azure CLI registration. The Consumption workload profile is also
+explicit in Terraform so a refresh does not propose removing Azure-normalised defaults.
 
 Both production manifests pin `aiohttp`, which is required by the asynchronous Azure Identity and
 Cosmos clients. Production-image validation imports `aiohttp`, constructs the async credential and
@@ -244,12 +254,78 @@ and a subsequent Terraform plan reported no drift. Live validation demonstrated 
 then read that mapping and three matching redirect-event documents from their separately scoped
 Cosmos containers after both application revisions had been restarted.
 
+## Production observability
+
+Terraform provisions one `PerGB2018` Log Analytics workspace and links it to the existing
+Container Apps Environment. The applications keep their vendor-neutral JSON stdout contract;
+Azure stores that stream in `ContainerAppConsoleLogs_CL`, where `Log_s` is parsed as JSON for
+correlation queries. No Azure logging SDK or duplicate log export path is used.
+
+Both applications use the same workspace-based Application Insights component while remaining
+distinct through `service.name` / cloud role. The existing providers export traces and explicit
+RED metrics directly through `AzureMonitorTraceExporter` and `AzureMonitorMetricExporter` with
+the app's own `AZURE_CLIENT_ID`. The Prometheus reader remains active. Azure and OTLP export are
+configuration-exclusive, and exporter initialization/delivery failures do not fail business
+requests.
+
+The production workbook **Observable URL Shortener - Production Observability** contains six
+query panels: request rate, server errors, duration average/max, signals by service, recent 5xx,
+and trace investigation. Azure represents custom duration histograms using `valueSum`,
+`valueCount`, `valueMin`, and `valueMax`; because this does not provide a defensible p95, the
+workbook clearly uses aggregate average and maximum seconds. The scheduled-query alert evaluates
+the explicit error counter every five minutes and raises at `TotalErrors > 0`; 404 remains outside
+that metric by application definition.
+
+The intended incident workflow is:
+
+```text
+workbook RED signal -> affected service/route/status
+                    -> representative distributed trace
+                    -> trace ID and application correlation ID
+                    -> parsed JSON logs in Log Analytics
+```
+
+Managed Grafana and the Container Apps managed OTel agent were intentionally not added. Azure's
+native workspace, Application Insights, workbook, and alert meet the assessment scope without a
+second hosted backend, while direct exporters preserve the explicitly lifecycle-owned providers,
+HTTPX client instrumentation, RED instruments, and local Collector workflow.
+
+The reproducible KQL and real text evidence live in `evidence/`. Portal trace, workbook, and
+structured-log screenshot instructions are in `evidence/README.md`; screenshot criteria remain
+open until a human captures the actual portal views.
+
+### Validated Phase 5 deployment
+
+The Australia East deployment was validated on 14 August 2026 using public immutable
+`linux/amd64` images tagged `phase5-7b3b526275b4`. Terraform added six observability resources
+and updated the environment and both apps in place with zero destroys. After correcting a
+provider-required lowercase workbook source ID, the isolated recovery apply added the workbook;
+the final plan reported no changes.
+
+The known correlation ID
+`azure-smoke-ef8c5d5a-80cb-4a90-bf7b-1290ea79ebfb` produced resolver trace
+`aa0c88bbd5e263bc7688bdffdc05ca86`. Application Insights showed resolver SERVER span
+`7f1d507876d17716` -> resolver HTTP dependency `ee44e32a578c97fe` -> shortener SERVER span
+`ff9a1edee4478588`. Parsed Log Analytics rows for both services contained that same correlation
+and trace ID. Both services produced request and duration custom metrics. The server-error series
+was correctly absent because no >=500 validation response occurred; real 404 traffic appeared
+only in the request counter.
+
+### What I would do differently with more time
+
+For a longer-lived system I would move Terraform state to a locked remote backend, restrict the
+shortener's internal endpoint using service identity/network policy, add deliberate sampling and
+data-retention budgets from observed traffic, route alerts through an environment-owned action
+group, and validate dashboard/alert queries in CI. I would also separate evidence traffic from
+user traffic with a bounded non-identifying dimension or deployment annotation, rather than add
+request IDs to metrics. None is justified inside this time-boxed assessment before CI Phase 6.
+
 ## Current local limits
 
 - Each `POST` deliberately creates a new code; URL deduplication is not required.
 - In-memory state is lost on restart and must run with one Uvicorn worker.
 - The `/internal` route denotes ownership, not an authenticated security boundary in this phase.
-- CI, Azure-native telemetry plumbing, cloud dashboards, alerts, and final evidence artifacts are
-  intentionally deferred to later phases.
+- CI and authenticated Azure Portal screenshots are intentionally deferred. Text/KQL production
+  evidence is present, but screenshot checklist items remain incomplete until real captures exist.
 
 Progress against the full assessment is tracked truthfully in `RUBRIC_CHECKLIST.md`.

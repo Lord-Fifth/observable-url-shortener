@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from threading import Lock
+from typing import Literal
 
+from azure.identity import ManagedIdentityCredential
+from azure.monitor.opentelemetry.exporter import (
+    AzureMonitorMetricExporter,
+    AzureMonitorTraceExporter,
+)
 from fastapi import FastAPI
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -25,12 +32,14 @@ from opentelemetry.sdk.trace.export import (
 from opentelemetry.semconv.resource import ResourceAttributes
 from prometheus_client import CollectorRegistry, generate_latest
 
-SERVICE_VERSION = "0.3.0"
+SERVICE_VERSION = "0.5.0"
 METRIC_REQUESTS = "url_shortener.http.server.requests"
 METRIC_ERRORS = "url_shortener.http.server.errors"
 METRIC_DURATION = "url_shortener.http.server.request.duration"
 EXCLUDED_HTTP_PATHS = frozenset({"/healthz", "/readyz", "/metrics"})
 _EXCLUDED_URLS_PATTERN = r".*/(?:healthz|readyz|metrics)$"
+_logger = logging.getLogger(__name__)
+RemoteBackend = Literal["azure_monitor", "otlp", "none", "injected"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +48,25 @@ class TelemetryConfig:
     otlp_endpoint: str | None
     export_timeout_seconds: float
     metric_export_interval_seconds: float
+    azure_monitor_enabled: bool = False
+    application_insights_connection_string: str | None = None
+    azure_client_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.azure_monitor_enabled and self.otlp_endpoint is not None:
+            raise ValueError("Azure Monitor and OTLP remote exporters are mutually exclusive")
+        if self.azure_monitor_enabled and (
+            self.application_insights_connection_string is None or self.azure_client_id is None
+        ):
+            raise ValueError("Azure Monitor requires a connection string and managed identity")
+
+
+@dataclass(slots=True)
+class _RemoteExporters:
+    backend: RemoteBackend
+    span: SpanExporter | None = None
+    metric: MetricExporter | None = None
+    credential: ManagedIdentityCredential | None = None
 
 
 class RedMetrics:
@@ -94,8 +122,15 @@ class TelemetryRuntime:
             }
         )
 
+        if span_exporter is not None or metric_exporter is not None:
+            remote = _RemoteExporters("injected", span=span_exporter, metric=metric_exporter)
+        else:
+            remote = self._configured_remote_exporters(config)
+        self.remote_backend = remote.backend
+        self._azure_credential = remote.credential
+
         self.tracer_provider = TracerProvider(resource=resource)
-        effective_span_exporter = span_exporter or self._otlp_span_exporter(config)
+        effective_span_exporter = remote.span
         if effective_span_exporter is not None:
             processor = (
                 SimpleSpanProcessor(effective_span_exporter)
@@ -104,9 +139,9 @@ class TelemetryRuntime:
             )
             self.tracer_provider.add_span_processor(processor)
 
-        prometheus_reader = PrometheusMetricReader(registry=self.registry)
-        metric_readers = [prometheus_reader]
-        effective_metric_exporter = metric_exporter or self._otlp_metric_exporter(config)
+        self.prometheus_reader = PrometheusMetricReader(registry=self.registry)
+        metric_readers = [self.prometheus_reader]
+        effective_metric_exporter = remote.metric
         if effective_metric_exporter is not None:
             metric_readers.append(
                 PeriodicExportingMetricReader(
@@ -132,22 +167,53 @@ class TelemetryRuntime:
         self._shutdown = False
 
     @staticmethod
-    def _otlp_span_exporter(config: TelemetryConfig) -> SpanExporter | None:
-        if config.otlp_endpoint is None:
-            return None
-        return OTLPSpanExporter(
-            endpoint=f"{config.otlp_endpoint}/v1/traces",
-            timeout=config.export_timeout_seconds,
-        )
-
-    @staticmethod
-    def _otlp_metric_exporter(config: TelemetryConfig) -> MetricExporter | None:
-        if config.otlp_endpoint is None:
-            return None
-        return OTLPMetricExporter(
-            endpoint=f"{config.otlp_endpoint}/v1/metrics",
-            timeout=config.export_timeout_seconds,
-        )
+    def _configured_remote_exporters(config: TelemetryConfig) -> _RemoteExporters:
+        if config.azure_monitor_enabled:
+            credential: ManagedIdentityCredential | None = None
+            trace_exporter: SpanExporter | None = None
+            try:
+                credential = ManagedIdentityCredential(client_id=config.azure_client_id)
+                common = {
+                    "connection_string": config.application_insights_connection_string,
+                    "credential": credential,
+                    "disable_offline_storage": True,
+                    "timeout": config.export_timeout_seconds,
+                }
+                trace_exporter = AzureMonitorTraceExporter(**common)
+                metric_exporter = AzureMonitorMetricExporter(**common)
+                return _RemoteExporters(
+                    "azure_monitor", trace_exporter, metric_exporter, credential
+                )
+            except Exception:
+                if trace_exporter is not None:
+                    try:
+                        trace_exporter.shutdown()
+                    except Exception:
+                        _logger.exception("Partially initialized trace exporter could not close")
+                if credential is not None:
+                    try:
+                        credential.close()
+                    except Exception:
+                        _logger.exception("Azure Monitor credential could not close")
+                _logger.exception("Azure Monitor telemetry exporters could not be initialized")
+                return _RemoteExporters("azure_monitor")
+        if config.otlp_endpoint is not None:
+            try:
+                return _RemoteExporters(
+                    "otlp",
+                    span=OTLPSpanExporter(
+                        endpoint=f"{config.otlp_endpoint}/v1/traces",
+                        timeout=config.export_timeout_seconds,
+                    ),
+                    metric=OTLPMetricExporter(
+                        endpoint=f"{config.otlp_endpoint}/v1/metrics",
+                        timeout=config.export_timeout_seconds,
+                    ),
+                )
+            except Exception:
+                _logger.exception("OTLP telemetry exporters could not be initialized")
+                return _RemoteExporters("otlp")
+        return _RemoteExporters("none")
 
     def instrument_fastapi(self, application: FastAPI) -> None:
         FastAPIInstrumentor.instrument_app(
@@ -170,10 +236,15 @@ class TelemetryRuntime:
         # Provider shutdown drains the batch span queue and performs the metric reader's final
         # collection. Run the independent providers concurrently so an unavailable backend costs
         # one bounded exporter timeout rather than a serial force-flush/shutdown retry chain.
-        await asyncio.gather(
-            asyncio.to_thread(self.tracer_provider.shutdown),
-            asyncio.to_thread(
-                self.meter_provider.shutdown,
-                timeout_millis=timeout_millis,
-            ),
-        )
+        try:
+            await asyncio.gather(
+                asyncio.to_thread(self.tracer_provider.shutdown),
+                asyncio.to_thread(
+                    self.meter_provider.shutdown,
+                    timeout_millis=timeout_millis,
+                ),
+                return_exceptions=True,
+            )
+        finally:
+            if self._azure_credential is not None:
+                await asyncio.to_thread(self._azure_credential.close)

@@ -9,6 +9,7 @@ import unicodedata
 from dataclasses import dataclass
 from typing import Literal, cast
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
@@ -37,6 +38,42 @@ def _positive_float(name: str, default: float) -> float:
         raise RuntimeError(f"{name} must be a number") from exc
     if not math.isfinite(value) or value <= 0:
         raise RuntimeError(f"{name} must be a finite number greater than zero")
+    return value
+
+
+def _boolean(name: str, default: bool = False) -> bool:
+    raw_value = os.getenv(name, str(default)).strip().lower()
+    if raw_value not in {"true", "false"}:
+        raise RuntimeError(f"{name} must be true or false")
+    return raw_value == "true"
+
+
+def _azure_client_id() -> str | None:
+    value = os.getenv("AZURE_CLIENT_ID")
+    if value is None:
+        return None
+    try:
+        return str(UUID(value))
+    except ValueError as exc:
+        raise RuntimeError("AZURE_CLIENT_ID must be a UUID") from exc
+
+
+def _application_insights_connection_string() -> str | None:
+    value = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    if value is None:
+        return None
+    if any(unicodedata.category(character) == "Cc" for character in value):
+        raise RuntimeError("APPLICATIONINSIGHTS_CONNECTION_STRING contains control characters")
+    fields = {
+        key.strip().lower(): field_value.strip()
+        for field in value.split(";")
+        if "=" in field
+        for key, field_value in [field.split("=", maxsplit=1)]
+    }
+    if not fields.get("instrumentationkey") or not fields.get("ingestionendpoint", "").startswith(
+        "https://"
+    ):
+        raise RuntimeError("APPLICATIONINSIGHTS_CONNECTION_STRING is not valid")
     return value
 
 
@@ -96,6 +133,9 @@ class Settings:
     otel_exporter_otlp_endpoint: str | None = None
     otel_export_timeout_seconds: float = 2.0
     otel_metric_export_interval_seconds: float = 5.0
+    azure_monitor_enabled: bool = False
+    application_insights_connection_string: str | None = None
+    azure_client_id: str | None = None
     repository_backend: RepositoryBackend = "memory"
     cosmos_endpoint: str | None = None
     cosmos_database_name: str = "url-shortener"
@@ -107,6 +147,21 @@ class Settings:
         if _SERVICE_NAME_PATTERN.fullmatch(otel_service_name) is None:
             raise RuntimeError("OTEL_SERVICE_NAME must be a compact service identifier")
         raw_otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        azure_monitor_enabled = _boolean("AZURE_MONITOR_ENABLED")
+        application_insights_connection_string = _application_insights_connection_string()
+        azure_client_id = _azure_client_id()
+        if azure_monitor_enabled and raw_otlp_endpoint is not None:
+            raise RuntimeError("Azure Monitor and OTLP remote exporters are mutually exclusive")
+        if azure_monitor_enabled and (
+            application_insights_connection_string is None or azure_client_id is None
+        ):
+            raise RuntimeError(
+                "Azure Monitor requires APPLICATIONINSIGHTS_CONNECTION_STRING and AZURE_CLIENT_ID"
+            )
+        if not azure_monitor_enabled and application_insights_connection_string is not None:
+            raise RuntimeError(
+                "APPLICATIONINSIGHTS_CONNECTION_STRING requires AZURE_MONITOR_ENABLED=true"
+            )
         repository_backend = _repository_backend()
         raw_cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
         if repository_backend == "cosmos" and raw_cosmos_endpoint is None:
@@ -132,6 +187,9 @@ class Settings:
             otel_metric_export_interval_seconds=_positive_float(
                 "OTEL_METRIC_EXPORT_INTERVAL_SECONDS", 5.0
             ),
+            azure_monitor_enabled=azure_monitor_enabled,
+            application_insights_connection_string=application_insights_connection_string,
+            azure_client_id=azure_client_id,
             repository_backend=repository_backend,
             cosmos_endpoint=cosmos_endpoint,
             cosmos_database_name=_cosmos_name("COSMOS_DATABASE_NAME", "url-shortener"),

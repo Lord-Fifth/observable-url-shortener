@@ -1,4 +1,4 @@
-"""Reject Phase 4 Terraform plans that violate the documented cost/scope guardrails."""
+"""Reject Terraform plans that violate the documented cost/scope guardrails."""
 
 from __future__ import annotations
 
@@ -19,6 +19,11 @@ ALLOWED_TYPES = {
     "azurerm_cosmosdb_sql_role_assignment",
     "azurerm_container_app_environment",
     "azurerm_container_app",
+    "azurerm_log_analytics_workspace",
+    "azurerm_application_insights",
+    "azurerm_application_insights_workbook",
+    "azurerm_monitor_scheduled_query_rules_alert_v2",
+    "azurerm_role_assignment",
 }
 
 
@@ -32,6 +37,14 @@ def one(resources: list[dict[str, Any]], resource_type: str) -> dict[str, Any]:
     matches = [resource for resource in resources if resource["type"] == resource_type]
     assert len(matches) == 1, (resource_type, len(matches))
     return matches[0]["values"]
+
+
+def change_for(plan: dict[str, Any], address: str) -> dict[str, Any]:
+    matches = [
+        change for change in plan.get("resource_changes", []) if change["address"] == address
+    ]
+    assert len(matches) == 1, (address, len(matches))
+    return matches[0]["change"]
 
 
 def main() -> None:
@@ -48,11 +61,17 @@ def main() -> None:
         timeout=60,
     )
     plan = json.loads(completed.stdout)
+    destructive = [
+        change["address"]
+        for change in plan.get("resource_changes", [])
+        if "delete" in change["change"]["actions"]
+    ]
+    assert not destructive, f"destructive resource changes are prohibited: {destructive}"
     resources = list(all_resources(plan["planned_values"]["root_module"]))
 
     unexpected = sorted({resource["type"] for resource in resources} - ALLOWED_TYPES)
     assert not unexpected, f"unexpected resource types: {unexpected}"
-    assert len(resources) == 13, f"expected 13 resources, got {len(resources)}"
+    assert len(resources) == 19, f"expected 19 resources, got {len(resources)}"
 
     for resource in resources:
         location = resource["values"].get("location")
@@ -102,9 +121,20 @@ def main() -> None:
         assert ingress["allow_insecure_connections"] is False
         assert ingress["target_port"] == 8080
         env_names = {item["name"] for item in template["container"][0]["env"]}
+        assert "AZURE_MONITOR_ENABLED" in env_names
+        assert "APPLICATIONINSIGHTS_CONNECTION_STRING" in env_names
+        assert "APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL" in env_names
+        assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env_names
         assert not any(
             "SECRET" in name or "PASSWORD" in name or "KEY" in name for name in env_names
         )
+
+    container_environment = one(resources, "azurerm_container_app_environment")
+    assert container_environment["logs_destination"] == "log-analytics"
+    environment_change = change_for(plan, "azurerm_container_app_environment.application")
+    assert container_environment.get("log_analytics_workspace_id") is not None or (
+        environment_change.get("after_unknown", {}).get("log_analytics_workspace_id") is True
+    )
 
     assignments = [
         resource["values"]
@@ -117,7 +147,67 @@ def main() -> None:
             assert scope != "/"
             assert "/colls/" in scope
 
-    print("PASS: Terraform plan contains only the 13 expected cost-bounded Azure resources")
+    workspace = one(resources, "azurerm_log_analytics_workspace")
+    assert workspace["sku"] == "PerGB2018"
+    assert workspace["retention_in_days"] == 30
+    assert workspace["daily_quota_gb"] == 1
+
+    application_insights = one(resources, "azurerm_application_insights")
+    assert application_insights["application_type"] == "web"
+    assert application_insights["sampling_percentage"] == 100
+    assert application_insights["daily_data_cap_in_gb"] == 1
+    assert application_insights["local_authentication_enabled"] is False
+    if application_insights.get("workspace_id") is not None:
+        assert application_insights["workspace_id"] == workspace["id"]
+    else:
+        insights_change = change_for(plan, "azurerm_application_insights.observability")
+        assert insights_change.get("after_unknown", {}).get("workspace_id") is True
+
+    telemetry_assignments = [
+        resource["values"]
+        for resource in resources
+        if resource["type"] == "azurerm_role_assignment"
+    ]
+    assert len(telemetry_assignments) == 2
+    identities = {
+        resource["values"]["principal_id"]
+        for resource in resources
+        if resource["type"] == "azurerm_user_assigned_identity"
+    }
+    assert {assignment["principal_id"] for assignment in telemetry_assignments} == identities
+    assert all(
+        assignment["role_definition_name"] == "Monitoring Metrics Publisher"
+        for assignment in telemetry_assignments
+    )
+    assert all(
+        not assignment.get("scope") or assignment["scope"] == application_insights["id"]
+        for assignment in telemetry_assignments
+    )
+
+    workbook = one(resources, "azurerm_application_insights_workbook")
+    assert workbook["display_name"] == "Observable URL Shortener - Production Observability"
+    if workbook.get("data_json") is not None:
+        assert all(
+            metric in workbook["data_json"]
+            for metric in {
+                "url_shortener.http.server.requests",
+                "url_shortener.http.server.errors",
+                "url_shortener.http.server.request.duration",
+            }
+        )
+    else:
+        workbook_change = change_for(plan, "azurerm_application_insights_workbook.production")
+        assert workbook_change.get("after_unknown", {}).get("data_json") is True
+
+    alert = one(resources, "azurerm_monitor_scheduled_query_rules_alert_v2")
+    assert alert["enabled"] is True
+    assert alert["evaluation_frequency"] == "PT5M"
+    assert alert["window_duration"] == "PT5M"
+    assert "url_shortener.http.server.errors" in alert["criteria"][0]["query"]
+    assert alert["criteria"][0]["operator"] == "GreaterThan"
+    assert alert["criteria"][0]["threshold"] == 0
+
+    print("PASS: Terraform plan contains only the 19 expected cost-bounded Azure resources")
 
 
 if __name__ == "__main__":

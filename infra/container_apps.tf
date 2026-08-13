@@ -1,8 +1,10 @@
 resource "azurerm_container_app_environment" "application" {
-  name                = "cae-ous-${random_string.suffix.result}"
-  location            = azurerm_resource_group.assessment.location
-  resource_group_name = azurerm_resource_group.assessment.name
-  tags                = local.common_tags
+  name                       = "cae-ous-${random_string.suffix.result}"
+  location                   = azurerm_resource_group.assessment.location
+  resource_group_name        = azurerm_resource_group.assessment.name
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.observability.id
+  logs_destination           = "log-analytics"
+  tags                       = local.common_tags
 
   workload_profile {
     name                  = "Consumption"
@@ -79,6 +81,18 @@ resource "azurerm_container_app" "resolver" {
         name  = "OTEL_SERVICE_NAME"
         value = "resolver"
       }
+      env {
+        name  = "AZURE_MONITOR_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        value = azurerm_application_insights.observability.connection_string
+      }
+      env {
+        name  = "APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL"
+        value = "true"
+      }
 
       liveness_probe {
         transport               = "HTTP"
@@ -103,7 +117,10 @@ resource "azurerm_container_app" "resolver" {
     }
   }
 
-  depends_on = [azurerm_cosmosdb_sql_role_assignment.resolver_events]
+  depends_on = [
+    azurerm_cosmosdb_sql_role_assignment.resolver_events,
+    azurerm_role_assignment.resolver_telemetry,
+  ]
 }
 
 resource "azurerm_container_app" "shortener" {
@@ -177,6 +194,18 @@ resource "azurerm_container_app" "shortener" {
         name  = "OTEL_SERVICE_NAME"
         value = "shortener"
       }
+      env {
+        name  = "AZURE_MONITOR_ENABLED"
+        value = "true"
+      }
+      env {
+        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        value = azurerm_application_insights.observability.connection_string
+      }
+      env {
+        name  = "APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL"
+        value = "true"
+      }
 
       liveness_probe {
         transport               = "HTTP"
@@ -201,5 +230,8 @@ resource "azurerm_container_app" "shortener" {
     }
   }
 
-  depends_on = [azurerm_cosmosdb_sql_role_assignment.shortener_mappings]
+  depends_on = [
+    azurerm_cosmosdb_sql_role_assignment.shortener_mappings,
+    azurerm_role_assignment.shortener_telemetry,
+  ]
 }

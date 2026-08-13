@@ -56,6 +56,11 @@ def create_app(
             otlp_endpoint=service_settings.otel_exporter_otlp_endpoint,
             export_timeout_seconds=service_settings.otel_export_timeout_seconds,
             metric_export_interval_seconds=(service_settings.otel_metric_export_interval_seconds),
+            azure_monitor_enabled=service_settings.azure_monitor_enabled,
+            application_insights_connection_string=(
+                service_settings.application_insights_connection_string
+            ),
+            azure_client_id=service_settings.azure_client_id,
         )
     )
 

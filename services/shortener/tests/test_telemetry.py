@@ -1,6 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Sequence
+
+import pytest
+import shortener.telemetry as telemetry_module
 from fastapi.testclient import TestClient
+from opentelemetry.sdk.metrics.export import (
+    MetricExporter,
+    MetricExportResult,
+    MetricsData,
+)
+from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind
 from prometheus_client.parser import text_string_to_metric_families
@@ -96,3 +108,121 @@ def test_real_500_increments_shortener_error_counter() -> None:
     totals = [sample for sample in errors if sample.name.endswith("_total")]
     assert sum(sample.value for sample in totals) == 1
     assert totals[0].labels["http_response_status_code"] == "500"
+
+
+class CapturingCredential:
+    def __init__(self, client_id: str) -> None:
+        self.client_id = client_id
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class CapturingSpanExporter(SpanExporter):
+    def __init__(self) -> None:
+        self.shutdown_called = False
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        return SpanExportResult.SUCCESS
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
+
+
+class CapturingMetricExporter(MetricExporter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.shutdown_called = False
+
+    def export(
+        self,
+        metrics_data: MetricsData,
+        timeout_millis: float = 10_000,
+        **kwargs: object,
+    ) -> MetricExportResult:
+        return MetricExportResult.SUCCESS
+
+    def force_flush(self, timeout_millis: float = 10_000) -> bool:
+        return True
+
+    def shutdown(self, timeout_millis: float = 30_000, **kwargs: object) -> None:
+        self.shutdown_called = True
+
+
+def test_azure_monitor_exporters_share_the_explicit_managed_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection_string = (
+        "InstrumentationKey=00000000-0000-0000-0000-000000000000;"
+        "IngestionEndpoint=https://example.test/"
+    )
+    credential = CapturingCredential("11111111-1111-1111-1111-111111111111")
+    span_exporter = CapturingSpanExporter()
+    metric_exporter = CapturingMetricExporter()
+    calls: dict[str, dict[str, object]] = {}
+
+    def credential_factory(*, client_id: str) -> CapturingCredential:
+        assert client_id == credential.client_id
+        return credential
+
+    def trace_factory(**kwargs: object) -> CapturingSpanExporter:
+        calls["trace"] = kwargs
+        return span_exporter
+
+    def metric_factory(**kwargs: object) -> CapturingMetricExporter:
+        calls["metric"] = kwargs
+        return metric_exporter
+
+    monkeypatch.setattr(telemetry_module, "ManagedIdentityCredential", credential_factory)
+    monkeypatch.setattr(telemetry_module, "AzureMonitorTraceExporter", trace_factory)
+    monkeypatch.setattr(telemetry_module, "AzureMonitorMetricExporter", metric_factory)
+
+    runtime = TelemetryRuntime(
+        TelemetryConfig(
+            "shortener",
+            None,
+            1.0,
+            60.0,
+            azure_monitor_enabled=True,
+            application_insights_connection_string=connection_string,
+            azure_client_id=credential.client_id,
+        )
+    )
+    runtime.red_metrics.record("POST", "/v1/urls", 201, 0.01)
+
+    assert runtime.remote_backend == "azure_monitor"
+    assert set(calls) == {"trace", "metric"}
+    for call in calls.values():
+        assert call["connection_string"] == connection_string
+        assert call["credential"] is credential
+        assert call["disable_offline_storage"] is True
+    assert b"url_shortener_http_server_requests" in runtime.prometheus_payload()
+
+    asyncio.run(runtime.ashutdown())
+    assert credential.closed
+    assert span_exporter.shutdown_called
+    assert metric_exporter.shutdown_called
+
+
+def test_conflicting_remote_exporters_are_rejected() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        TelemetryConfig(
+            "shortener",
+            "http://collector.test:4318",
+            1.0,
+            5.0,
+            azure_monitor_enabled=True,
+            application_insights_connection_string="InstrumentationKey=unused",
+            azure_client_id="11111111-1111-1111-1111-111111111111",
+        )
+
+
+def test_no_remote_backend_keeps_prometheus_active() -> None:
+    runtime = TelemetryRuntime(TelemetryConfig("shortener", None, 1.0, 5.0))
+    runtime.red_metrics.record("POST", "/v1/urls", 201, 0.01)
+
+    assert runtime.remote_backend == "none"
+    assert b"url_shortener_http_server_requests" in runtime.prometheus_payload()
+
+    asyncio.run(runtime.ashutdown())

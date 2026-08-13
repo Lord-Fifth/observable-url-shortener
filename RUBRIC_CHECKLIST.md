@@ -46,9 +46,9 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] OpenTelemetry instrumentation
 - [x] Distributed trace spanning services
 - [x] Logs correlated with trace
-- [ ] Metrics correlated operationally with services/traces
-- [ ] Dashboard
-- [ ] Alert
+- [x] Metrics correlated operationally with services/traces
+- [x] Dashboard
+- [x] Alert
 
 ### Operability
 
@@ -74,13 +74,13 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Datastore ADR
 - [x] Cloud-target ADR
 - [x] Observability ADR
-- [ ] What-I-would-do-differently ADR
+- [x] What-I-would-do-differently ADR
 
 ### Evidence
 
 - [ ] Trace screenshot
 - [ ] Dashboard screenshot
-- [ ] Structured log evidence with correlation ID
+- [x] Structured log evidence with correlation ID
 
 ## Phase 0-1 definition of done
 
@@ -203,3 +203,38 @@ The mapping survived a shortener revision restart, and managed-identity reads af
 shortener restarts directly showed the mapping plus three redirect events in their separately
 scoped Cosmos containers. The deployment-script item remains open because recovery was performed
 as reviewed staged commands rather than one uninterrupted script run.
+
+## Phase 5 definition of done
+
+- [x] Log Analytics workspace exists via Terraform
+- [x] Container Apps stdout logs reach Log Analytics
+- [x] Application Insights exists via Terraform and is workspace based
+- [x] Application Insights local authentication is disabled
+- [x] Both service identities have Application Insights-scoped telemetry publication RBAC
+- [x] No telemetry client secret or API key exists in application configuration
+- [x] Azure and local OTLP backends are explicit and mutually exclusive
+- [x] Prometheus remains available with every telemetry backend
+- [x] Deployed shortener and resolver traces reach Azure
+- [x] One real distributed trace contains resolver SERVER, resolver CLIENT, and shortener SERVER spans
+- [x] Production JSON logs retain the same correlation and trace IDs
+- [x] RED request and duration metrics are visible from both deployed services
+- [x] RED error metric semantics and lazy-series behaviour are directly validated
+- [x] Azure custom metric aggregation fields and bounded dimensions are documented
+- [x] Terraform-managed production workbook exists with six validated query panels
+- [x] Terraform-managed server-error alert exists and is enabled
+- [x] Local OTel Collector, Prometheus, structured logs, and trace workflow remain green
+- [x] New immutable public Linux/amd64 GHCR images are deployed
+- [x] Live Azure health, readiness, create, resolve, correlation, and unknown-code smoke passes
+- [x] Terraform safety validation passes and post-apply plan has no drift
+- [x] README, AGENTS guidance, rubric, KQL, and text evidence are updated
+- [ ] Real trace screenshot saved
+- [ ] Real workbook/dashboard screenshot saved
+- [ ] Real structured-log screenshot saved
+
+Phase 5 live evidence: public Linux/amd64 images use immutable tag `phase5-7b3b526275b4`.
+Terraform's complete change set was six additions and three in-place updates with zero destroys;
+the workbook-only recovery added one resource after lowercasing the provider-required source ID,
+and the final plan reported no changes across 19 resources. Correlation ID
+`azure-smoke-ef8c5d5a-80cb-4a90-bf7b-1290ea79ebfb` maps from parsed logs to Application Insights
+operation ID `aa0c88bbd5e263bc7688bdffdc05ca86`. Queryable text evidence is stored in `evidence/`.
+All three screenshot items remain open until a human saves authenticated portal captures.
