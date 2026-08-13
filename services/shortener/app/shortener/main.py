@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from shortener.config import Settings
 from shortener.correlation import CorrelationIdMiddleware
@@ -27,6 +28,7 @@ from shortener.service import (
     RandomCodeGenerator,
     ShortenerService,
 )
+from shortener.telemetry import TelemetryConfig, TelemetryRuntime
 
 RepositoryFactory = Callable[[], UrlRepository]
 
@@ -35,30 +37,45 @@ def create_app(
     settings: Settings | None = None,
     repository_factory: RepositoryFactory = InMemoryUrlRepository,
     code_generator: CodeGenerator | None = None,
+    telemetry: TelemetryRuntime | None = None,
 ) -> FastAPI:
     service_settings = settings or Settings.from_env()
+    telemetry_runtime = telemetry or TelemetryRuntime(
+        TelemetryConfig(
+            service_name=service_settings.otel_service_name,
+            otlp_endpoint=service_settings.otel_exporter_otlp_endpoint,
+            export_timeout_seconds=service_settings.otel_export_timeout_seconds,
+            metric_export_interval_seconds=(service_settings.otel_metric_export_interval_seconds),
+        )
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        repository = repository_factory()
-        generator = code_generator or RandomCodeGenerator(service_settings.code_length)
-        application.state.repository = repository
-        application.state.shortener_service = ShortenerService(
-            repository=repository,
-            code_generator=generator,
-            max_attempts=service_settings.max_code_attempts,
-        )
-        application.state.ready = True
-        try:
-            yield
-        finally:
-            application.state.ready = False
-            await repository.aclose()
+        async with AsyncExitStack() as resources:
+            resources.push_async_callback(telemetry_runtime.ashutdown)
+            repository = repository_factory()
+            resources.push_async_callback(repository.aclose)
+            generator = code_generator or RandomCodeGenerator(service_settings.code_length)
+            application.state.repository = repository
+            application.state.shortener_service = ShortenerService(
+                repository=repository,
+                code_generator=generator,
+                max_attempts=service_settings.max_code_attempts,
+            )
+            application.state.ready = True
+            try:
+                yield
+            finally:
+                application.state.ready = False
 
     application = FastAPI(title="observable-url-shortener", lifespan=lifespan)
     application.state.ready = False
+    application.state.telemetry = telemetry_runtime
     application.add_middleware(UnhandledExceptionMiddleware)
-    application.add_middleware(RequestLoggingMiddleware)
+    application.add_middleware(
+        RequestLoggingMiddleware,
+        red_metrics=telemetry_runtime.red_metrics,
+    )
     application.add_middleware(CorrelationIdMiddleware)
 
     @application.exception_handler(CodeAllocationExhausted)
@@ -88,6 +105,13 @@ def create_app(
                 detail="service is not ready",
             )
         return StatusResponse(status="ready")
+
+    @application.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        return Response(
+            content=telemetry_runtime.prometheus_payload(),
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
+        )
 
     @application.post(
         "/v1/urls",
@@ -131,6 +155,7 @@ def create_app(
         )
         return UrlMappingResponse(code=mapping.code, url=mapping.url)
 
+    telemetry_runtime.instrument_fastapi(application)
     return application
 
 

@@ -107,3 +107,22 @@ def test_unknown_mapping_has_no_misleading_success_event(
     events = [entry["event"] for entry in captured_logs.entries]
     assert "url_mapping_lookup_not_found" in events
     assert "url_mapping_lookup_succeeded" not in events
+
+
+def test_log_outside_span_does_not_fabricate_trace_identifiers() -> None:
+    formatter = JsonFormatter()
+    record = logging.LogRecord(
+        name="test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="Outside request",
+        args=(),
+        exc_info=None,
+    )
+
+    entry = json.loads(formatter.format(record))
+
+    assert "trace_id" not in entry
+    assert "span_id" not in entry
+    assert "trace_sampled" not in entry

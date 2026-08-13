@@ -171,6 +171,15 @@ async def test_concurrent_requests_do_not_leak_correlation_context(
     }
     assert completion_by_path["/first"]["correlation_id"] == "correlation-first"
     assert completion_by_path["/second"]["correlation_id"] == "correlation-second"
+    assert len(str(completion_by_path["/first"]["trace_id"])) == 32
+    assert len(str(completion_by_path["/second"]["trace_id"])) == 32
+    assert completion_by_path["/first"]["trace_id"] != completion_by_path["/second"]["trace_id"]
+    assert completion_by_path["/first"]["trace_id"] != "correlation-first"
+    assert completion_by_path["/second"]["trace_id"] != "correlation-second"
+    assert len(str(completion_by_path["/first"]["span_id"])) == 16
+    assert len(str(completion_by_path["/second"]["span_id"])) == 16
+    assert completion_by_path["/first"]["trace_sampled"] is True
+    assert completion_by_path["/second"]["trace_sampled"] is True
     for entry in captured_logs.entries:
         if entry.get("code") == "first":
             assert entry["correlation_id"] == "correlation-first"

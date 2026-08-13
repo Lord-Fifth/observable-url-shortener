@@ -1,14 +1,25 @@
 name: observable-url-shortener
 
 services:
+  otel-collector:
+    image: otel/opentelemetry-collector:0.135.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    restart: unless-stopped
+
   shortener:
     build:
       context: ./services/shortener
-    image: observable-url-shortener-shortener:phase02
+    image: observable-url-shortener-shortener:phase03
     environment:
       RESOLVER_BASE_URL: http://localhost:8081
       SHORT_CODE_LENGTH: "8"
       SHORT_CODE_MAX_ATTEMPTS: "5"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: shortener
+      OTEL_EXPORT_TIMEOUT_SECONDS: "2.0"
+      OTEL_METRIC_EXPORT_INTERVAL_SECONDS: "2.0"
     ports:
       - "8080:8080"
     healthcheck:
@@ -25,19 +36,28 @@ services:
       start_period: 3s
     init: true
     stop_grace_period: 10s
+    depends_on:
+      otel-collector:
+        condition: service_started
 
   resolver:
     build:
       context: ./services/resolver
-    image: observable-url-shortener-resolver:phase02
+    image: observable-url-shortener-resolver:phase03
     environment:
       SHORTENER_BASE_URL: http://shortener:8080
       SHORTENER_TIMEOUT_SECONDS: "2.0"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: resolver
+      OTEL_EXPORT_TIMEOUT_SECONDS: "2.0"
+      OTEL_METRIC_EXPORT_INTERVAL_SECONDS: "2.0"
     ports:
       - "8081:8080"
     depends_on:
       shortener:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       test:
         - CMD

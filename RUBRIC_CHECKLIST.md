@@ -38,14 +38,14 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Structured logs
 - [x] Correlation-ID generation
 - [x] Correlation-ID propagation
-- [ ] RED rate metric
-- [ ] RED error metric
-- [ ] RED duration metric
-- [ ] RED metrics exposed
-- [ ] RED metrics visible/scraped
-- [ ] OpenTelemetry instrumentation
-- [ ] Distributed trace spanning services
-- [ ] Logs correlated with trace
+- [x] RED rate metric
+- [x] RED error metric
+- [x] RED duration metric
+- [x] RED metrics exposed
+- [x] RED metrics visible/scraped
+- [x] OpenTelemetry instrumentation
+- [x] Distributed trace spanning services
+- [x] Logs correlated with trace
 - [ ] Metrics correlated operationally with services/traces
 - [ ] Dashboard
 - [ ] Alert
@@ -73,7 +73,7 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Service-boundary ADR
 - [x] Datastore ADR
 - [ ] Cloud-target ADR
-- [ ] Observability ADR
+- [x] Observability ADR
 - [ ] What-I-would-do-differently ADR
 
 ### Evidence
@@ -123,4 +123,32 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Graceful Compose shutdown remains valid
 - [x] README documents local structured logging and correlation
 - [x] `AGENTS.md` preserves the Phase 2 logging/context decision
+- [x] Master rubric status updated truthfully
+
+## Phase 3 definition of done
+
+- [x] Existing behaviour remains green
+- [x] Both FastAPI services produce real OpenTelemetry server spans
+- [x] Resolver's real HTTPX call produces a client span
+- [x] Standard W3C trace context propagates resolver to shortener
+- [x] One distributed trace contains resolver and shortener spans
+- [x] Existing correlation ID remains separate and preserved
+- [x] Structured logs contain real trace and span IDs only when a valid span is active
+- [x] Application RED rate, `>=500` error, and duration histogram metrics exist
+- [x] `/metrics` exposes RED metrics in Prometheus text format
+- [x] Metric labels have bounded cardinality and exclude request-specific IDs, URLs, and codes
+- [x] Health, readiness, and metrics endpoints are excluded from application RED metrics
+- [x] OTLP traces reach the local Collector
+- [x] OTLP metrics reach the local Collector
+- [x] Real-container logs prove cross-service trace continuity
+- [x] Collector output proves both services participate in the same trace
+- [x] Collector failure does not break normal application functionality
+- [x] Telemetry flush and shutdown complete cleanly with bounded export timeouts
+- [x] Full test suite passes
+- [x] Ruff lint and format checks pass
+- [x] Both Phase 3 Docker images build
+- [x] Docker Compose starts all services healthy
+- [x] Extended smoke validation passes
+- [x] README documents trace flow, correlation distinction, RED metrics, and local inspection
+- [x] `AGENTS.md` preserves Phase 3 telemetry decisions
 - [x] Master rubric status updated truthfully

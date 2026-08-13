@@ -9,7 +9,8 @@ from datetime import UTC, datetime
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from resolver.client import MappingNotFound, ShortenerClient, UpstreamUnavailable
 from resolver.config import Settings
@@ -23,6 +24,7 @@ from resolver.repository import (
     RedirectEventRepository,
 )
 from resolver.request_logging import RequestLoggingMiddleware
+from resolver.telemetry import TelemetryConfig, TelemetryRuntime
 
 EventRepositoryFactory = Callable[[], RedirectEventRepository]
 
@@ -31,12 +33,22 @@ def create_app(
     settings: Settings | None = None,
     event_repository_factory: EventRepositoryFactory = InMemoryRedirectEventRepository,
     transport: httpx.AsyncBaseTransport | None = None,
+    telemetry: TelemetryRuntime | None = None,
 ) -> FastAPI:
     service_settings = settings or Settings.from_env()
+    telemetry_runtime = telemetry or TelemetryRuntime(
+        TelemetryConfig(
+            service_name=service_settings.otel_service_name,
+            otlp_endpoint=service_settings.otel_exporter_otlp_endpoint,
+            export_timeout_seconds=service_settings.otel_export_timeout_seconds,
+            metric_export_interval_seconds=(service_settings.otel_metric_export_interval_seconds),
+        )
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as resources:
+            resources.push_async_callback(telemetry_runtime.ashutdown)
             event_repository = event_repository_factory()
             resources.push_async_callback(event_repository.aclose)
             http_client = await resources.enter_async_context(
@@ -47,6 +59,8 @@ def create_app(
                     transport=transport,
                 )
             )
+            telemetry_runtime.instrument_httpx(http_client)
+            resources.callback(telemetry_runtime.uninstrument_httpx, http_client)
             application.state.event_repository = event_repository
             application.state.http_client = http_client
             application.state.shortener_client = ShortenerClient(http_client)
@@ -58,8 +72,12 @@ def create_app(
 
     application = FastAPI(title="observable-url-resolver", lifespan=lifespan)
     application.state.ready = False
+    application.state.telemetry = telemetry_runtime
     application.add_middleware(UnhandledExceptionMiddleware)
-    application.add_middleware(RequestLoggingMiddleware)
+    application.add_middleware(
+        RequestLoggingMiddleware,
+        red_metrics=telemetry_runtime.red_metrics,
+    )
     application.add_middleware(CorrelationIdMiddleware)
 
     @application.get("/healthz", response_model=StatusResponse)
@@ -74,6 +92,13 @@ def create_app(
                 detail="service is not ready",
             )
         return StatusResponse(status="ready")
+
+    @application.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        return Response(
+            content=telemetry_runtime.prometheus_payload(),
+            headers={"Content-Type": CONTENT_TYPE_LATEST},
+        )
 
     @application.get(
         "/{code}",
@@ -138,6 +163,7 @@ def create_app(
         )
         return RedirectResponse(url=destination, status_code=status.HTTP_302_FOUND)
 
+    telemetry_runtime.instrument_fastapi(application)
     return application
 
 

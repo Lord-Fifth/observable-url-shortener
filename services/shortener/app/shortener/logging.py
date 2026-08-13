@@ -8,6 +8,8 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
+from opentelemetry import trace
+
 from shortener.correlation import get_correlation_id
 
 SERVICE_NAME = "shortener"
@@ -58,6 +60,15 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "correlation_id": getattr(record, "correlation_id", None) or get_correlation_id(),
         }
+        span_context = trace.get_current_span().get_span_context()
+        if span_context.is_valid:
+            payload.update(
+                {
+                    "trace_id": f"{span_context.trace_id:032x}",
+                    "span_id": f"{span_context.span_id:016x}",
+                    "trace_sampled": span_context.trace_flags.sampled,
+                }
+            )
         for name, value in record.__dict__.items():
             if name not in _RESERVED_FIELDS and name not in payload and not name.startswith("_"):
                 payload[name] = value

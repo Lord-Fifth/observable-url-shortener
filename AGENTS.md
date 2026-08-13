@@ -14,12 +14,20 @@ part of the service phases.
 - `shortener` owns URL mappings, short-code allocation, persistence, and its internal lookup.
 - `resolver` owns redirect behaviour and redirect events. It must use the shortener's HTTP API
   and must never read the mapping datastore directly.
-- Preserve the resolver-to-shortener hop so future OpenTelemetry traces span both services.
+- Preserve the resolver-to-shortener hop and its distributed OpenTelemetry trace.
 - Use repository protocols. Phase 0-1 uses in-memory adapters; deployed persistence is Firestore.
 - Google Cloud Run, Terraform, OpenTelemetry, and Google Cloud Observability are selected
   architectural decisions. Do not silently change one; document a technical reason first.
 - Propagate one exact `X-Correlation-ID` across the full HTTP path and expose it to later logging
   and tracing through request context.
+- Keep correlation IDs and OpenTelemetry trace IDs distinct. Enrich logs only from real current
+  trace context; never fabricate or manually propagate trace/span IDs.
+- Use standard W3C propagation and instance-scoped instrumentation on the resolver's shared HTTPX
+  client. Do not globally instrument unrelated clients.
+- RED labels must remain low-cardinality. Request-specific IDs, raw paths, short codes, URLs, and
+  query strings must never become metric labels.
+- Telemetry backend failure must never fail user requests. Later cloud work should reuse the OTLP
+  application instrumentation and change the backend rather than replacing it.
 
 ## Complete Part 2 acceptance criteria
 
@@ -41,15 +49,19 @@ Phase 0-1 includes the two local services, in-memory repositories, correlation s
 health/readiness, lifespan ownership and shutdown, unit/integration tests, Ruff, real Dockerfiles,
 Docker Compose, and the cross-service smoke test.
 
-Phase 2 adds standard-library structured JSON application logs to stdout. The application logging
+Phase 2 added standard-library structured JSON application logs to stdout. The application logging
 API automatically reads correlation context and deliberately excludes request bodies, query
-strings, and destination URLs. Subsequent tracing/telemetry phases must enrich this context and
-formatter with real trace/span state rather than replacing the mechanism or fabricating IDs.
+strings, and destination URLs.
+
+Phase 3 adds programmatic OpenTelemetry FastAPI/HTTPX tracing, portable log enrichment, explicit
+application RED metrics, `/metrics`, and a minimal local OTLP Collector. Telemetry providers,
+exporters, the Prometheus registry, and HTTPX instrumentation are lifespan-owned and shut down with
+bounded export timeouts. Operational endpoints are excluded. FastAPI tracing uses a no-op meter
+provider so only the explicit RED instruments represent server HTTP metrics.
 
 Until a later explicit phase, do not create or deploy GCP resources, run `terraform apply`, add
-Firestore, tracing, metrics or cloud exporters, dashboards, alerts, GitHub Actions, Pub/Sub, Redis,
-Kubernetes, authentication, a UI, or Assessment Part 1. Infrastructure and observability
-directories may describe deferred work but must not contain fake implementations.
+Firestore, cloud-specific telemetry exporters, dashboards, alerts, GitHub Actions, Pub/Sub, Redis,
+Kubernetes, authentication, a UI, or Assessment Part 1.
 
 Do not commit, push, create a repository, store credentials, or modify global Python installations
 unless the user explicitly changes scope.
@@ -61,6 +73,8 @@ unless the user explicitly changes scope.
 - Keep mapping insertion atomic; never implement collision handling as a separate existence check
   followed by a write.
 - Use one shared resolver `httpx.AsyncClient`, owned and closed by FastAPI lifespan.
+- Keep trace and metric export optional and environment-configured. OTLP exporter errors are never
+  allowed to alter HTTP responses.
 - Never make health/readiness perform a per-request external dependency probe.
 - Preserve safe error mapping: unknown code is `404`; failed or invalid upstream is `503`; never
   expose stack traces or internal exception text.

@@ -1,8 +1,9 @@
 # Observable URL Shortener
 
-Phase 0-1 of Assessment Part 2 implements a deliberately small two-service URL
-shortener. The services communicate only through HTTP and are independently runnable and
-containerised. Cloud persistence, deployment, and telemetry exporters are deferred.
+Phase 3 of Assessment Part 2 implements a deliberately small, observable two-service URL
+shortener. The services communicate only through HTTP, are independently containerised, and
+export portable OpenTelemetry traces and RED metrics to a local Collector. Cloud persistence and
+deployment remain deferred.
 
 ## Architecture
 
@@ -11,9 +12,9 @@ containerised. Cloud persistence, deployment, and telemetry exporters are deferr
 | `shortener` | URL mappings and short-code allocation | `POST /v1/urls` | None |
 | `resolver` | Redirect behaviour and redirect events | `GET /{code}` | `GET /internal/v1/urls/{code}` on `shortener` |
 
-Both services also expose `GET /healthz` and `GET /readyz`. The resolver never reads the
-mapping repository directly. A successful resolution is therefore a genuine HTTP service
-hop that can become one distributed trace in a later phase.
+Both services also expose `GET /healthz`, `GET /readyz`, and `GET /metrics`. The resolver never
+reads the mapping repository directly. A successful resolution is therefore a genuine HTTP
+service hop represented by one distributed trace.
 
 Every request accepts or creates an `X-Correlation-ID`, returns it to the caller, and makes
 it available in request context. The resolver sends the exact ID to the shortener and
@@ -80,9 +81,33 @@ SDK or local log files. Stable fields include `timestamp`, `severity`, `service`
 duration. Request bodies, query strings, and destination URLs are deliberately excluded.
 
 Every request preserves a valid incoming `X-Correlation-ID` or creates a UUID and returns it. The
-resolver propagates the same ID to the shortener, allowing one request to be followed across both
-services with `docker compose logs`. OpenTelemetry trace/span enrichment will build on this
-context and structured formatter in Phase 3; no trace identifiers are fabricated in this phase.
+resolver propagates the same ID to the shortener. OpenTelemetry independently creates and
+propagates W3C Trace Context. A correlation ID is an application-visible identifier; it is not a
+trace ID and is never copied into one. Logs emitted in an active span add the real `trace_id`,
+`span_id`, and `trace_sampled` values and omit those fields outside a valid span.
+
+The resolver instruments only its lifespan-owned HTTPX client. The expected trace is:
+
+```text
+client -> resolver GET /{code} SERVER
+              -> shortener lookup HTTP CLIENT
+                    -> shortener GET /internal/v1/urls/{code} SERVER
+```
+
+Both services record the following explicit OpenTelemetry metrics; the Prometheus endpoint
+converts dots to underscores and adds the usual counter/histogram suffixes:
+
+| RED signal | OpenTelemetry metric | Definition |
+| --- | --- | --- |
+| Rate | `url_shortener.http.server.requests` | Incoming application requests |
+| Errors | `url_shortener.http.server.errors` | Responses with status `>=500` |
+| Duration | `url_shortener.http.server.request.duration` | Request latency histogram in seconds |
+
+A normal `404` is visible on the request metric but is not an availability error. `/healthz`,
+`/readyz`, and `/metrics` are excluded from tracing and RED metrics so probes and scrapes do not
+dominate application signals. Labels are limited to method, route template, and response status;
+request paths, codes, URLs, correlation IDs, trace IDs, and span IDs are never labels. The error
+counter is created lazily, so it is absent from `/metrics` until the first `>=500` response.
 
 ## Docker Compose acceptance path
 
@@ -91,14 +116,22 @@ With Docker Desktop running:
 ```powershell
 docker compose up --detach --build --wait --wait-timeout 60
 .\.venv\Scripts\python.exe .\scripts\smoke.py
+Invoke-WebRequest -UseBasicParsing http://localhost:8080/metrics | Select-Object -Expand Content
+Invoke-WebRequest -UseBasicParsing http://localhost:8081/metrics | Select-Object -Expand Content
+docker compose logs --no-color shortener resolver
+docker compose logs --no-color otel-collector
 docker compose down --remove-orphans
 ```
 
-Compose publishes shortener on `localhost:8080` and resolver on `localhost:8081`. The smoke test
-creates a mapping, resolves it without following the redirect, verifies `Location`, and checks the
-correlation ID. It then parses application JSON from `docker compose logs` and proves that the same
-known ID appears in both services. The resolver's strict echo check independently proves that the
-same ID completed the internal shortener hop.
+Compose publishes shortener on `localhost:8080` and resolver on `localhost:8081`; the pinned local
+Collector stays on the Compose network. The smoke test creates and resolves a mapping without
+following the redirect, validates bounded Prometheus output, parses both services' JSON logs, and
+proves one real trace's SERVER -> CLIENT -> SERVER parent chain in Collector debug output. It also
+waits for OTLP metrics from both services. The resolver's strict correlation-ID echo remains a
+separate application contract.
+
+Trace and metric export are deliberately outside the business critical path. If the Collector is
+unavailable, export errors may be logged, but URL creation and resolution continue normally.
 
 ## Architecture decisions
 
@@ -124,12 +157,22 @@ The resolver records the redirect event before returning `302`. If recording fai
 a generic `503` instead of silently losing an event. A future durable asynchronous event path
 could justify fail-open behaviour, but adding one now would exceed the assessment scope.
 
-## Phase 0-1 limits
+### ADR-004: Keep portable telemetry explicit and lifecycle-owned
+
+Official FastAPI and instance-scoped HTTPX instrumentation create spans and propagate standard W3C
+context. Each service owns its providers and exporters in FastAPI lifespan, uses explicit RED
+instruments with low-cardinality labels, and exposes a custom Prometheus registry. FastAPI's
+automatic meter provider is no-op to avoid duplicate HTTP metric families. Compose exports OTLP
+HTTP to a minimal pinned Collector; later cloud work can replace the backend without rewriting
+business instrumentation. The cost is a small intentional telemetry-module duplication so each
+service remains independently buildable.
+
+## Current local limits
 
 - Each `POST` deliberately creates a new code; URL deduplication is not required.
 - In-memory state is lost on restart and must run with one Uvicorn worker.
 - The `/internal` route denotes ownership, not an authenticated security boundary in this phase.
-- Firestore, Terraform, GCP deployment, CI, RED metrics, OpenTelemetry, dashboards, alerts, and
-  final deployed evidence artifacts are intentionally deferred.
+- Firestore, Terraform, GCP deployment, CI, cloud dashboards, alerts, and final deployed evidence
+  artifacts are intentionally deferred.
 
 Progress against the full assessment is tracked truthfully in `RUBRIC_CHECKLIST.md`.

@@ -8,13 +8,15 @@ from time import perf_counter
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from resolver.logging import log_event
+from resolver.telemetry import EXCLUDED_HTTP_PATHS, RedMetrics
 
 
 class RequestLoggingMiddleware:
     """Emit one useful completion record after each HTTP response."""
 
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, red_metrics: RedMetrics) -> None:
         self._app = app
+        self._red_metrics = red_metrics
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -33,7 +35,16 @@ class RequestLoggingMiddleware:
         try:
             await self._app(scope, receive, capture_status)
         finally:
-            duration_ms = round((perf_counter() - started_at) * 1000, 3)
+            duration_seconds = perf_counter() - started_at
+            duration_ms = round(duration_seconds * 1000, 3)
+            if scope["path"] not in EXCLUDED_HTTP_PATHS:
+                route = getattr(scope.get("route"), "path", "UNMATCHED")
+                self._red_metrics.record(
+                    method=scope["method"],
+                    route=route,
+                    status_code=status_code,
+                    duration_seconds=duration_seconds,
+                )
             log_event(
                 logging.ERROR if status_code >= 500 else logging.INFO,
                 "http_request_completed",
