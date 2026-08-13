@@ -24,14 +24,14 @@ An item is checked only after implementation and direct validation. Deferred ite
 ### Persistence
 
 - [x] Local persistence strategy
-- [ ] Durable deployed persistence
+- [x] Durable deployed persistence
 
 ### Cloud
 
-- [ ] Managed-cloud deployment
-- [ ] Live URL OR one-command reproducible deployment
+- [x] Managed-cloud deployment
+- [x] Live URL OR one-command reproducible deployment
 - [x] Infrastructure as code
-- [ ] No click-ops required for application infrastructure
+- [x] No click-ops required for application infrastructure
 
 ### Observability
 
@@ -63,7 +63,7 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [ ] CI build
 - [ ] CI test
 - [ ] CI deployable artifact
-- [ ] Deployed secrets handled correctly
+- [x] Deployed secrets handled correctly
 - [x] No hardcoded credentials
 
 ### README
@@ -165,29 +165,29 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Terraform is implemented
 - [x] Terraform state is ignored and the provider lock file exists
 - [x] AzureRM providers initialize
-- [ ] Resource providers registered through Terraform/provider mechanism
-- [ ] Resource group created via IaC
-- [ ] Cosmos account created via IaC
-- [ ] Cosmos free tier directly verified in Azure
-- [ ] Cosmos directly verified as non-serverless with throughput <=1000 RU/s
-- [ ] Both Cosmos containers directly verified in Azure
-- [ ] Shortener identity scope directly verified on `url_mappings`
-- [ ] Resolver identity scope directly verified on `redirect_events`
+- [x] Resource providers registered through Terraform/provider mechanism
+- [x] Resource group created via IaC
+- [x] Cosmos account created via IaC
+- [x] Cosmos free tier directly verified in Azure
+- [x] Cosmos directly verified as non-serverless with throughput <=1000 RU/s
+- [x] Both Cosmos containers directly verified in Azure
+- [x] Shortener identity scope directly verified on `url_mappings`
+- [x] Resolver identity scope directly verified on `redirect_events`
 - [x] Both images build locally
-- [ ] Images pushed to GHCR
-- [ ] Images anonymously pullable from GHCR
-- [ ] Container Apps environment created
-- [ ] Shortener Container App created
-- [ ] Resolver Container App created
-- [ ] Deployed minimum replicas directly verified as zero
-- [ ] Both live HTTPS FQDNs exist
-- [ ] Resolver cloud call directly verified through service discovery
-- [ ] Shortener directly verified returning the public resolver URL
-- [ ] Live health and readiness checks pass
-- [ ] Live create/resolve flow passes
-- [ ] Live correlation ID remains correct
-- [ ] Mapping survives a deployed process lifecycle
-- [ ] Redirect-event persistence directly demonstrated
+- [x] Images pushed to GHCR
+- [x] Images anonymously pullable from GHCR
+- [x] Container Apps environment created
+- [x] Shortener Container App created
+- [x] Resolver Container App created
+- [x] Deployed minimum replicas directly verified as zero
+- [x] Both live HTTPS FQDNs exist
+- [x] Resolver cloud call directly verified through service discovery
+- [x] Shortener directly verified returning the public resolver URL
+- [x] Live health and readiness checks pass
+- [x] Live create/resolve flow passes
+- [x] Live correlation ID remains correct
+- [x] Mapping survives a deployed process lifecycle
+- [x] Redirect-event persistence directly demonstrated
 - [x] Local Docker and Compose workflow remains green
 - [x] Existing local OpenTelemetry workflow remains green
 - [ ] Deployment script works end to end
@@ -195,6 +195,11 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Azure/Cosmos/identity/GHCR ADR trade-offs are documented
 - [x] Rubric is updated truthfully
 
-Current external blocker: Docker is not authenticated to `ghcr.io`. No Azure application resources
-have been applied. Terraform validation passes and the reviewed plan is 13 to add, 0 to change, 0
-to destroy; cloud-only items remain unchecked until image publication and live validation succeed.
+Phase 4 live evidence: public Linux/amd64 images use immutable tag `phase4-9350f17348ab`; the
+recovery plan and apply changed only the two Container Apps (`0 added, 2 changed, 0 destroyed`),
+and the post-apply plan had zero drift. Both HTTPS applications became healthy. The cloud smoke
+created and resolved code `qXJLudH2`, preserved correlation IDs, and returned the expected `404`.
+The mapping survived a shortener revision restart, and managed-identity reads after resolver and
+shortener restarts directly showed the mapping plus three redirect events in their separately
+scoped Cosmos containers. The deployment-script item remains open because recovery was performed
+as reviewed staged commands rather than one uninterrupted script run.

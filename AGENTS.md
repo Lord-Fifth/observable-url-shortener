@@ -74,6 +74,14 @@ access is scoped only to `redirect_events`. Resolver still reads mappings exclus
 `http://<shortener-app-name>` Container Apps service discovery. Both apps scale to zero with
 `min_replicas=0`. Phase 5 owns Azure-native logs, traces, metrics, dashboard, alerts, and evidence.
 
+The AzureRM provider must keep explicit narrow registration for `Microsoft.App`,
+`Microsoft.DocumentDB`, and `Microsoft.OperationalInsights`; do not replace it with broad provider
+registration or portal/CLI click-ops. Both runtime manifests must retain a pinned `aiohttp` because
+the asynchronous Azure Identity and Cosmos clients require that transport. Production-image checks
+must exercise those imports inside Linux images. Keep each app's `AZURE_CLIENT_ID` wired to the
+same user-assigned identity attached to that app, and keep the Consumption workload profile
+explicit so provider refreshes do not introduce unrelated drift.
+
 Until a later explicit phase, do not add Azure-specific telemetry exporters, dashboards, alerts,
 GitHub Actions, Redis, Service Bus, Kubernetes, authentication, a UI, or Assessment Part 1. Do not
 introduce GCP, Cloud Run, Firestore, ACR, AKS, App Service, VNet, private endpoints, API Management,

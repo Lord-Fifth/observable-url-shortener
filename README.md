@@ -202,6 +202,16 @@ resource names and service-specific `AZURE_CLIENT_ID` values in Azure.
 
 ## Azure deployment
 
+The AzureRM provider explicitly registers only `Microsoft.App`, `Microsoft.DocumentDB`, and
+`Microsoft.OperationalInsights`; provider registration is therefore reproducible without portal
+or Azure CLI registration. The Consumption workload profile is also explicit in Terraform so a
+refresh does not propose removing Azure-normalised defaults.
+
+Both production manifests pin `aiohttp`, which is required by the asynchronous Azure Identity and
+Cosmos clients. Production-image validation imports `aiohttp`, constructs the async credential and
+Cosmos client, and closes both inside the Linux container rather than relying on the developer
+virtual environment.
+
 Prerequisites are an Enabled Azure CLI subscription, Terraform, Docker, the repository `.venv`,
 and Docker authentication to GHCR. Authenticate without storing a token in the repository:
 
@@ -215,6 +225,24 @@ The orchestrator validates locally, derives an immutable source-snapshot tag, bu
 both images, initializes/plans/validates/applies Terraform, prints HTTPS outputs, runs live smoke,
 restarts the shortener revision, and resolves the same mapping again as a durability proof. Local
 Terraform state is deliberately accepted for the assessment and excluded from Git.
+
+### Validated Phase 4 deployment
+
+The Australia East deployment was validated on 14 August 2026 using immutable public images tagged
+`phase4-9350f17348ab`:
+
+| Service | Live HTTPS origin |
+| --- | --- |
+| Shortener | `https://ous-shortener-qafji9.happybay-4a23884e.australiaeast.azurecontainerapps.io` |
+| Resolver | `https://ous-resolver-qafji9.happybay-4a23884e.australiaeast.azurecontainerapps.io` |
+
+The recovery apply changed only the two Container App images (`0 added, 2 changed, 0 destroyed`),
+and a subsequent Terraform plan reported no drift. Live validation demonstrated health/readiness,
+`POST` creation, the public resolver URL in the response, a `302` through the configured internal
+`http://ous-shortener-qafji9` hop, exact `Location` and correlation-ID behaviour, and an unknown-code
+`404`. Code `qXJLudH2` resolved after restarting the shortener revision. Managed-identity queries
+then read that mapping and three matching redirect-event documents from their separately scoped
+Cosmos containers after both application revisions had been restarted.
 
 ## Current local limits
 

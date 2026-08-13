@@ -3,6 +3,13 @@ resource "azurerm_container_app_environment" "application" {
   location            = azurerm_resource_group.assessment.location
   resource_group_name = azurerm_resource_group.assessment.name
   tags                = local.common_tags
+
+  workload_profile {
+    name                  = "Consumption"
+    workload_profile_type = "Consumption"
+    minimum_count         = 0
+    maximum_count         = 0
+  }
 }
 
 resource "azurerm_container_app" "resolver" {
@@ -10,6 +17,7 @@ resource "azurerm_container_app" "resolver" {
   container_app_environment_id = azurerm_container_app_environment.application.id
   resource_group_name          = azurerm_resource_group.assessment.name
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
   tags                         = local.common_tags
 
   identity {
@@ -103,6 +111,7 @@ resource "azurerm_container_app" "shortener" {
   container_app_environment_id = azurerm_container_app_environment.application.id
   resource_group_name          = azurerm_resource_group.assessment.name
   revision_mode                = "Single"
+  workload_profile_name        = "Consumption"
   tags                         = local.common_tags
 
   identity {
@@ -194,4 +203,3 @@ resource "azurerm_container_app" "shortener" {
 
   depends_on = [azurerm_cosmosdb_sql_role_assignment.shortener_mappings]
 }
-
