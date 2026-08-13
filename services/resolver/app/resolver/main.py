@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
+from inspect import isawaitable
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, status
@@ -22,16 +23,29 @@ from resolver.repository import (
     InMemoryRedirectEventRepository,
     RedirectEvent,
     RedirectEventRepository,
+    create_cosmos_redirect_event_repository,
 )
 from resolver.request_logging import RequestLoggingMiddleware
 from resolver.telemetry import TelemetryConfig, TelemetryRuntime
 
-EventRepositoryFactory = Callable[[], RedirectEventRepository]
+EventRepositoryFactory = Callable[[], RedirectEventRepository | Awaitable[RedirectEventRepository]]
+
+
+async def _repository_from_settings(settings: Settings) -> RedirectEventRepository:
+    if settings.repository_backend == "memory":
+        return InMemoryRedirectEventRepository()
+    if settings.cosmos_endpoint is None:
+        raise RuntimeError("Cosmos endpoint is required for the Cosmos repository")
+    return await create_cosmos_redirect_event_repository(
+        settings.cosmos_endpoint,
+        settings.cosmos_database_name,
+        settings.cosmos_redirect_events_container,
+    )
 
 
 def create_app(
     settings: Settings | None = None,
-    event_repository_factory: EventRepositoryFactory = InMemoryRedirectEventRepository,
+    event_repository_factory: EventRepositoryFactory | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
     telemetry: TelemetryRuntime | None = None,
 ) -> FastAPI:
@@ -49,7 +63,15 @@ def create_app(
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as resources:
             resources.push_async_callback(telemetry_runtime.ashutdown)
-            event_repository = event_repository_factory()
+            if event_repository_factory is None:
+                event_repository = await _repository_from_settings(service_settings)
+            else:
+                repository_or_awaitable = event_repository_factory()
+                event_repository = (
+                    await repository_or_awaitable
+                    if isawaitable(repository_or_awaitable)
+                    else repository_or_awaitable
+                )
             resources.push_async_callback(event_repository.aclose)
             http_client = await resources.enter_async_context(
                 httpx.AsyncClient(

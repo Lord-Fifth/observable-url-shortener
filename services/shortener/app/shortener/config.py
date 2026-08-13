@@ -7,12 +7,15 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Literal, cast
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
 _HTTP_URL_ADAPTER = TypeAdapter(AnyHttpUrl)
 _SERVICE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+_COSMOS_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,255}$")
+RepositoryBackend = Literal["memory", "cosmos"]
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -68,6 +71,20 @@ def _service_base_url(name: str, default: str) -> str:
     return value.rstrip("/")
 
 
+def _repository_backend() -> RepositoryBackend:
+    value = os.getenv("REPOSITORY_BACKEND", "memory").lower()
+    if value not in {"memory", "cosmos"}:
+        raise RuntimeError("REPOSITORY_BACKEND must be memory or cosmos")
+    return cast(RepositoryBackend, value)
+
+
+def _cosmos_name(name: str, default: str) -> str:
+    value = os.getenv(name, default)
+    if _COSMOS_NAME_PATTERN.fullmatch(value) is None:
+        raise RuntimeError(f"{name} must be a compact Cosmos resource name")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Configuration needed by one shortener process."""
@@ -79,6 +96,10 @@ class Settings:
     otel_exporter_otlp_endpoint: str | None = None
     otel_export_timeout_seconds: float = 2.0
     otel_metric_export_interval_seconds: float = 5.0
+    repository_backend: RepositoryBackend = "memory"
+    cosmos_endpoint: str | None = None
+    cosmos_database_name: str = "url-shortener"
+    cosmos_mappings_container: str = "url_mappings"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -86,6 +107,17 @@ class Settings:
         if _SERVICE_NAME_PATTERN.fullmatch(otel_service_name) is None:
             raise RuntimeError("OTEL_SERVICE_NAME must be a compact service identifier")
         raw_otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        repository_backend = _repository_backend()
+        raw_cosmos_endpoint = os.getenv("COSMOS_ENDPOINT")
+        if repository_backend == "cosmos" and raw_cosmos_endpoint is None:
+            raise RuntimeError("COSMOS_ENDPOINT is required when REPOSITORY_BACKEND=cosmos")
+        cosmos_endpoint = (
+            _service_base_url("COSMOS_ENDPOINT", raw_cosmos_endpoint)
+            if raw_cosmos_endpoint
+            else None
+        )
+        if cosmos_endpoint is not None and not cosmos_endpoint.startswith("https://"):
+            raise RuntimeError("COSMOS_ENDPOINT must use HTTPS")
         return cls(
             resolver_base_url=_service_base_url("RESOLVER_BASE_URL", "http://localhost:8081"),
             code_length=_positive_int("SHORT_CODE_LENGTH", 8),
@@ -100,4 +132,8 @@ class Settings:
             otel_metric_export_interval_seconds=_positive_float(
                 "OTEL_METRIC_EXPORT_INTERVAL_SECONDS", 5.0
             ),
+            repository_backend=repository_backend,
+            cosmos_endpoint=cosmos_endpoint,
+            cosmos_database_name=_cosmos_name("COSMOS_DATABASE_NAME", "url-shortener"),
+            cosmos_mappings_container=_cosmos_name("COSMOS_MAPPINGS_CONTAINER", "url_mappings"),
         )

@@ -30,7 +30,7 @@ An item is checked only after implementation and direct validation. Deferred ite
 
 - [ ] Managed-cloud deployment
 - [ ] Live URL OR one-command reproducible deployment
-- [ ] Infrastructure as code
+- [x] Infrastructure as code
 - [ ] No click-ops required for application infrastructure
 
 ### Observability
@@ -69,10 +69,10 @@ An item is checked only after implementation and direct validation. Deferred ite
 ### README
 
 - [x] Local-run instructions
-- [ ] Deployment instructions
+- [x] Deployment instructions
 - [x] Service-boundary ADR
 - [x] Datastore ADR
-- [ ] Cloud-target ADR
+- [x] Cloud-target ADR
 - [x] Observability ADR
 - [ ] What-I-would-do-differently ADR
 
@@ -152,3 +152,49 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] README documents trace flow, correlation distinction, RED metrics, and local inspection
 - [x] `AGENTS.md` preserves Phase 3 telemetry decisions
 - [x] Master rubric status updated truthfully
+
+## Phase 4 definition of done
+
+- [x] Baseline tests were established
+- [x] Cosmos adapters implemented
+- [x] Local memory backend remains default
+- [x] `DefaultAzureCredential` is used
+- [x] No Cosmos keys exist in application configuration
+- [x] Atomic mapping creation is implemented
+- [x] Cosmos repository tests pass
+- [x] Terraform is implemented
+- [x] Terraform state is ignored and the provider lock file exists
+- [x] AzureRM providers initialize
+- [ ] Resource providers registered through Terraform/provider mechanism
+- [ ] Resource group created via IaC
+- [ ] Cosmos account created via IaC
+- [ ] Cosmos free tier directly verified in Azure
+- [ ] Cosmos directly verified as non-serverless with throughput <=1000 RU/s
+- [ ] Both Cosmos containers directly verified in Azure
+- [ ] Shortener identity scope directly verified on `url_mappings`
+- [ ] Resolver identity scope directly verified on `redirect_events`
+- [x] Both images build locally
+- [ ] Images pushed to GHCR
+- [ ] Images anonymously pullable from GHCR
+- [ ] Container Apps environment created
+- [ ] Shortener Container App created
+- [ ] Resolver Container App created
+- [ ] Deployed minimum replicas directly verified as zero
+- [ ] Both live HTTPS FQDNs exist
+- [ ] Resolver cloud call directly verified through service discovery
+- [ ] Shortener directly verified returning the public resolver URL
+- [ ] Live health and readiness checks pass
+- [ ] Live create/resolve flow passes
+- [ ] Live correlation ID remains correct
+- [ ] Mapping survives a deployed process lifecycle
+- [ ] Redirect-event persistence directly demonstrated
+- [x] Local Docker and Compose workflow remains green
+- [x] Existing local OpenTelemetry workflow remains green
+- [ ] Deployment script works end to end
+- [x] README includes Azure architecture and deployment instructions
+- [x] Azure/Cosmos/identity/GHCR ADR trade-offs are documented
+- [x] Rubric is updated truthfully
+
+Current external blocker: Docker is not authenticated to `ghcr.io`. No Azure application resources
+have been applied. Terraform validation passes and the reviewed plan is 13 to add, 0 to change, 0
+to destroy; cloud-only items remain unchecked until image publication and live validation succeed.

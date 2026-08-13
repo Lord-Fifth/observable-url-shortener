@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
+from inspect import isawaitable
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -20,7 +21,11 @@ from shortener.models import (
     StatusResponse,
     UrlMappingResponse,
 )
-from shortener.repository import InMemoryUrlRepository, UrlRepository
+from shortener.repository import (
+    InMemoryUrlRepository,
+    UrlRepository,
+    create_cosmos_url_repository,
+)
 from shortener.request_logging import RequestLoggingMiddleware
 from shortener.service import (
     CodeAllocationExhausted,
@@ -30,12 +35,24 @@ from shortener.service import (
 )
 from shortener.telemetry import TelemetryConfig, TelemetryRuntime
 
-RepositoryFactory = Callable[[], UrlRepository]
+RepositoryFactory = Callable[[], UrlRepository | Awaitable[UrlRepository]]
+
+
+async def _repository_from_settings(settings: Settings) -> UrlRepository:
+    if settings.repository_backend == "memory":
+        return InMemoryUrlRepository()
+    if settings.cosmos_endpoint is None:
+        raise RuntimeError("Cosmos endpoint is required for the Cosmos repository")
+    return await create_cosmos_url_repository(
+        settings.cosmos_endpoint,
+        settings.cosmos_database_name,
+        settings.cosmos_mappings_container,
+    )
 
 
 def create_app(
     settings: Settings | None = None,
-    repository_factory: RepositoryFactory = InMemoryUrlRepository,
+    repository_factory: RepositoryFactory | None = None,
     code_generator: CodeGenerator | None = None,
     telemetry: TelemetryRuntime | None = None,
 ) -> FastAPI:
@@ -53,7 +70,15 @@ def create_app(
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         async with AsyncExitStack() as resources:
             resources.push_async_callback(telemetry_runtime.ashutdown)
-            repository = repository_factory()
+            if repository_factory is None:
+                repository = await _repository_from_settings(service_settings)
+            else:
+                repository_or_awaitable = repository_factory()
+                repository = (
+                    await repository_or_awaitable
+                    if isawaitable(repository_or_awaitable)
+                    else repository_or_awaitable
+                )
             resources.push_async_callback(repository.aclose)
             generator = code_generator or RandomCodeGenerator(service_settings.code_length)
             application.state.repository = repository

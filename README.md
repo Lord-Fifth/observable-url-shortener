@@ -1,9 +1,9 @@
 # Observable URL Shortener
 
-Phase 3 of Assessment Part 2 implements a deliberately small, observable two-service URL
-shortener. The services communicate only through HTTP, are independently containerised, and
-export portable OpenTelemetry traces and RED metrics to a local Collector. Cloud persistence and
-deployment remain deferred.
+Phase 4 of Assessment Part 2 implements a deliberately small, observable two-service URL
+shortener. The services communicate only through HTTP, are independently containerised, export
+portable OpenTelemetry signals locally, and have a Terraform-managed Azure deployment path with
+durable Cosmos DB persistence.
 
 ## Architecture
 
@@ -143,13 +143,14 @@ This adds one network hop and couples redirect availability to the shortener; in
 prevents shared-database coupling, preserves independent deployment, and creates the service
 span required by the assessment.
 
-### ADR-002: Use repository protocols with Phase 0-1 in-memory adapters
+### ADR-002: Use repository protocols with memory and Cosmos adapters
 
-An atomic `insert_if_absent` contract makes collision handling race-safe and maps to a future
-Firestore create/precondition operation. Process-local adapters keep this phase deterministic
-and infrastructure-free. The trade-off is non-durable data and exactly one application worker
-per service container. Firestore remains the selected deployed datastore and must be justified
-and implemented in a later phase.
+An atomic `insert_if_absent` contract makes collision handling race-safe. Local memory adapters
+keep tests and development credential-free. Azure uses Cosmos `create_item` with code as both
+document ID and `/code` partition key; a 409 maps to the existing bounded retry. Cosmos suits the
+key/document access pattern and free tier without relational joins. Compared with PostgreSQL it
+avoids schema and server operations, at the cost of Cosmos-specific partitioning and consistency
+decisions. Redirect events omit destination URLs and use their own `/code` container.
 
 ### ADR-003: Fail closed when redirect-event recording fails
 
@@ -167,12 +168,60 @@ HTTP to a minimal pinned Collector; later cloud work can replace the backend wit
 business instrumentation. The cost is a small intentional telemetry-module duplication so each
 service remains independently buildable.
 
+### ADR-005: Deploy to Azure Container Apps with secretless, narrow data access
+
+Azure Container Apps runs the existing Docker images directly, provides HTTPS ingress,
+scale-to-zero Consumption compute, and app-name service discovery with little platform operation.
+Public GHCR avoids the cost and identity plumbing of ACR, but image packages must be explicitly
+public. Terraform creates separate user-assigned identities: shortener is a Cosmos data contributor
+only on `url_mappings`, while resolver is scoped only to `redirect_events`. Applications use
+`DefaultAzureCredential`; database keys and connection strings are disabled. Both public ingresses
+are an assessment usability trade-off: `/internal` is not an authenticated production boundary,
+and production would restrict it with identity/network policy. Auth is deliberately out of scope.
+
+## Azure architecture
+
+All regional resources are colocated in Australia East inside one Terraform-owned resource group:
+
+```text
+Internet -> shortener Container App -> managed identity -> Cosmos url_mappings
+Internet -> resolver Container App  -> managed identity -> Cosmos redirect_events
+                    |
+                    +-> http://<shortener-app-name> -> shortener internal API
+```
+
+One free-tier Cosmos DB for NoSQL account contains one database with 1000 RU/s provisioned shared
+throughput, capped at 1000 RU/s account-wide. Neither container has dedicated throughput. It is
+single-region, non-serverless, has no analytical store or dedicated gateway, and disables local
+key authentication. Container Apps use 0.25 CPU/0.5 GiB, `min_replicas=0`, `max_replicas=2`, and
+separate identities. Azure telemetry export stays disabled until Phase 5; JSON stdout and portable
+instrumentation remain intact.
+
+Local runs default to `REPOSITORY_BACKEND=memory`. Terraform sets `cosmos` plus non-secret Cosmos
+resource names and service-specific `AZURE_CLIENT_ID` values in Azure.
+
+## Azure deployment
+
+Prerequisites are an Enabled Azure CLI subscription, Terraform, Docker, the repository `.venv`,
+and Docker authentication to GHCR. Authenticate without storing a token in the repository:
+
+```powershell
+$env:CR_PAT | docker login ghcr.io -u lord-fifth --password-stdin
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-azure.ps1
+```
+
+The two GitHub Packages must be Public so Container Apps can pull them without registry secrets.
+The orchestrator validates locally, derives an immutable source-snapshot tag, builds and pushes
+both images, initializes/plans/validates/applies Terraform, prints HTTPS outputs, runs live smoke,
+restarts the shortener revision, and resolves the same mapping again as a durability proof. Local
+Terraform state is deliberately accepted for the assessment and excluded from Git.
+
 ## Current local limits
 
 - Each `POST` deliberately creates a new code; URL deduplication is not required.
 - In-memory state is lost on restart and must run with one Uvicorn worker.
 - The `/internal` route denotes ownership, not an authenticated security boundary in this phase.
-- Firestore, Terraform, GCP deployment, CI, cloud dashboards, alerts, and final deployed evidence
-  artifacts are intentionally deferred.
+- CI, Azure-native telemetry plumbing, cloud dashboards, alerts, and final evidence artifacts are
+  intentionally deferred to later phases.
 
 Progress against the full assessment is tracked truthfully in `RUBRIC_CHECKLIST.md`.

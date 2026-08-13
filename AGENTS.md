@@ -15,9 +15,11 @@ part of the service phases.
 - `resolver` owns redirect behaviour and redirect events. It must use the shortener's HTTP API
   and must never read the mapping datastore directly.
 - Preserve the resolver-to-shortener hop and its distributed OpenTelemetry trace.
-- Use repository protocols. Phase 0-1 uses in-memory adapters; deployed persistence is Firestore.
-- Google Cloud Run, Terraform, OpenTelemetry, and Google Cloud Observability are selected
-  architectural decisions. Do not silently change one; document a technical reason first.
+- Use repository protocols. Local persistence is memory; deployed persistence is Azure Cosmos DB
+  for NoSQL.
+- Azure Container Apps, Cosmos DB, Terraform, public GHCR, OpenTelemetry, and Azure-native
+  observability are selected architectural decisions. Do not silently change one; document a
+  technical reason first.
 - Propagate one exact `X-Correlation-ID` across the full HTTP path and expose it to later logging
   and tracing through request context.
 - Keep correlation IDs and OpenTelemetry trace IDs distinct. Enrich logs only from real current
@@ -59,9 +61,23 @@ exporters, the Prometheus registry, and HTTPX instrumentation are lifespan-owned
 bounded export timeouts. Operational endpoints are excluded. FastAPI tracing uses a no-op meter
 provider so only the explicit RED instruments represent server HTTP metrics.
 
-Until a later explicit phase, do not create or deploy GCP resources, run `terraform apply`, add
-Firestore, cloud-specific telemetry exporters, dashboards, alerts, GitHub Actions, Pub/Sub, Redis,
-Kubernetes, authentication, a UI, or Assessment Part 1.
+Phase 4 adds the first managed deployment: Azure Container Apps in Australia East, public GHCR
+images, and one free-tier Cosmos DB for NoSQL account. Cosmos uses provisioned database-level
+shared throughput capped at 1000 RU/s, never serverless or container-dedicated throughput. Local
+repositories remain memory by default; cloud repositories are selected with
+`REPOSITORY_BACKEND=cosmos`.
+
+Each Container App uses its own user-assigned managed identity and `DefaultAzureCredential`; no
+Cosmos keys, connection strings, client secrets, or registry credentials belong in application
+configuration. Shortener Cosmos data-plane access is scoped only to `url_mappings`; resolver
+access is scoped only to `redirect_events`. Resolver still reads mappings exclusively through
+`http://<shortener-app-name>` Container Apps service discovery. Both apps scale to zero with
+`min_replicas=0`. Phase 5 owns Azure-native logs, traces, metrics, dashboard, alerts, and evidence.
+
+Until a later explicit phase, do not add Azure-specific telemetry exporters, dashboards, alerts,
+GitHub Actions, Redis, Service Bus, Kubernetes, authentication, a UI, or Assessment Part 1. Do not
+introduce GCP, Cloud Run, Firestore, ACR, AKS, App Service, VNet, private endpoints, API Management,
+Front Door, or other resources outside the Phase 4 Terraform root.
 
 Do not commit, push, create a repository, store credentials, or modify global Python installations
 unless the user explicitly changes scope.
@@ -75,6 +91,8 @@ unless the user explicitly changes scope.
 - Use one shared resolver `httpx.AsyncClient`, owned and closed by FastAPI lifespan.
 - Keep trace and metric export optional and environment-configured. OTLP exporter errors are never
   allowed to alter HTTP responses.
+- Keep Cosmos clients and credentials lifespan-owned. Mapping writes must use atomic create and
+  treat conflict as collision; never implement read-then-upsert.
 - Never make health/readiness perform a per-request external dependency probe.
 - Preserve safe error mapping: unknown code is `404`; failed or invalid upstream is `503`; never
   expose stack traces or internal exception text.
