@@ -1,0 +1,1 @@
+"""Resolver service tests."""

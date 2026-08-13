@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+asyncio_mode = "auto"
+pythonpath = [
+  "services/shortener/app",
+  "services/resolver/app",
+]
+testpaths = [
+  "services/shortener/tests",
+  "services/resolver/tests",
+  "tests/integration",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+

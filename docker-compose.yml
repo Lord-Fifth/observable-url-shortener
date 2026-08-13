@@ -1,0 +1,55 @@
+name: observable-url-shortener
+
+services:
+  shortener:
+    build:
+      context: ./services/shortener
+    image: observable-url-shortener-shortener:phase01
+    environment:
+      RESOLVER_BASE_URL: http://localhost:8081
+      SHORT_CODE_LENGTH: "8"
+      SHORT_CODE_MAX_ATTEMPTS: "5"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=2)
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+    init: true
+    stop_grace_period: 10s
+
+  resolver:
+    build:
+      context: ./services/resolver
+    image: observable-url-shortener-resolver:phase01
+    environment:
+      SHORTENER_BASE_URL: http://shortener:8080
+      SHORTENER_TIMEOUT_SECONDS: "2.0"
+    ports:
+      - "8081:8080"
+    depends_on:
+      shortener:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/readyz', timeout=2)
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+    init: true
+    stop_grace_period: 10s
+
