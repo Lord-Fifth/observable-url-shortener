@@ -41,8 +41,13 @@ Phase 0-1 includes the two local services, in-memory repositories, correlation s
 health/readiness, lifespan ownership and shutdown, unit/integration tests, Ruff, real Dockerfiles,
 Docker Compose, and the cross-service smoke test.
 
+Phase 2 adds standard-library structured JSON application logs to stdout. The application logging
+API automatically reads correlation context and deliberately excludes request bodies, query
+strings, and destination URLs. Subsequent tracing/telemetry phases must enrich this context and
+formatter with real trace/span state rather than replacing the mechanism or fabricating IDs.
+
 Until a later explicit phase, do not create or deploy GCP resources, run `terraform apply`, add
-Firestore, telemetry or cloud exporters, dashboards, alerts, GitHub Actions, Pub/Sub, Redis,
+Firestore, tracing, metrics or cloud exporters, dashboards, alerts, GitHub Actions, Pub/Sub, Redis,
 Kubernetes, authentication, a UI, or Assessment Part 1. Infrastructure and observability
 directories may describe deferred work but must not contain fake implementations.
 
@@ -63,4 +68,3 @@ unless the user explicitly changes scope.
 - After every substantive phase, run relevant tests and Ruff. Before calling Phase 0-1 complete,
   run all tests, both Ruff checks, both image builds, Compose startup, and the real smoke script.
 - Preserve unrelated user work and update `RUBRIC_CHECKLIST.md` truthfully after validation.
-

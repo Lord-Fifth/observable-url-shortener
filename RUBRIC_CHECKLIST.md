@@ -35,7 +35,7 @@ An item is checked only after implementation and direct validation. Deferred ite
 
 ### Observability
 
-- [ ] Structured logs
+- [x] Structured logs
 - [x] Correlation-ID generation
 - [x] Correlation-ID propagation
 - [ ] RED rate metric
@@ -102,3 +102,25 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] `RUBRIC_CHECKLIST.md` exists
 - [x] `AGENTS.md` exists
 - [x] README contains minimal Phase 0-1 local instructions
+
+## Phase 2 definition of done
+
+- [x] Both services emit valid single-line JSON application logs
+- [x] Application logs are written to stdout
+- [x] Request logs automatically include correlation IDs
+- [x] Resolver propagates the identical correlation ID to shortener
+- [x] Same known correlation ID demonstrated in both real-container logs
+- [x] Request logs contain method, path, status, and duration
+- [x] Upstream and 5xx failures use ERROR severity
+- [x] Request bodies, query strings, and destination URLs are excluded
+- [x] Concurrent requests do not leak correlation context
+- [x] Existing service contracts and behavior remain passing
+- [x] Full test suite passes
+- [x] Ruff lint and format checks pass
+- [x] Both Phase 2 Docker images build
+- [x] Docker Compose starts both services healthy
+- [x] Real cross-service smoke and JSON-log validation pass
+- [x] Graceful Compose shutdown remains valid
+- [x] README documents local structured logging and correlation
+- [x] `AGENTS.md` preserves the Phase 2 logging/context decision
+- [x] Master rubric status updated truthfully

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
@@ -14,12 +15,14 @@ from resolver.client import MappingNotFound, ShortenerClient, UpstreamUnavailabl
 from resolver.config import Settings
 from resolver.correlation import CorrelationIdMiddleware, require_correlation_id
 from resolver.errors import UnhandledExceptionMiddleware
+from resolver.logging import log_event
 from resolver.models import StatusResponse
 from resolver.repository import (
     InMemoryRedirectEventRepository,
     RedirectEvent,
     RedirectEventRepository,
 )
+from resolver.request_logging import RequestLoggingMiddleware
 
 EventRepositoryFactory = Callable[[], RedirectEventRepository]
 
@@ -56,6 +59,7 @@ def create_app(
     application = FastAPI(title="observable-url-resolver", lifespan=lifespan)
     application.state.ready = False
     application.add_middleware(UnhandledExceptionMiddleware)
+    application.add_middleware(RequestLoggingMiddleware)
     application.add_middleware(CorrelationIdMiddleware)
 
     @application.get("/healthz", response_model=StatusResponse)
@@ -82,6 +86,12 @@ def create_app(
         try:
             destination = await shortener_client.get_destination(code, correlation_id)
         except MappingNotFound as exc:
+            log_event(
+                logging.INFO,
+                "redirect_mapping_not_found",
+                "Redirect mapping not found",
+                code=code,
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="code not found"
             ) from exc
@@ -102,11 +112,30 @@ def create_app(
                 )
             )
         except Exception as exc:
+            log_event(
+                logging.ERROR,
+                "redirect_event_recording_failed",
+                "Redirect event could not be recorded",
+                code=code,
+                exception_type=type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="redirect event could not be recorded",
             ) from exc
 
+        log_event(
+            logging.INFO,
+            "redirect_event_recorded",
+            "Redirect event recorded",
+            code=code,
+        )
+        log_event(
+            logging.INFO,
+            "redirect_resolved",
+            "Redirect resolved",
+            code=code,
+        )
         return RedirectResponse(url=destination, status_code=status.HTTP_302_FOUND)
 
     return application

@@ -4,7 +4,7 @@ services:
   shortener:
     build:
       context: ./services/shortener
-    image: observable-url-shortener-shortener:phase01
+    image: observable-url-shortener-shortener:phase02
     environment:
       RESOLVER_BASE_URL: http://localhost:8081
       SHORT_CODE_LENGTH: "8"
@@ -29,7 +29,7 @@ services:
   resolver:
     build:
       context: ./services/resolver
-    image: observable-url-shortener-resolver:phase01
+    image: observable-url-shortener-resolver:phase02
     environment:
       SHORTENER_BASE_URL: http://shortener:8080
       SHORTENER_TIMEOUT_SECONDS: "2.0"
@@ -52,4 +52,3 @@ services:
       start_period: 3s
     init: true
     stop_grace_period: 10s
-

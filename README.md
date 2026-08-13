@@ -72,6 +72,18 @@ an `.env` file.
 The integration test starts both ASGI applications and crosses the same HTTP adapter used in
 production. Resolver unit tests mock only the HTTP boundary and never import shortener code.
 
+## Local observability
+
+Both services emit application logs as single-line JSON to stdout, so containers need no logging
+SDK or local log files. Stable fields include `timestamp`, `severity`, `service`, `event`,
+`message`, and `correlation_id`; HTTP completion events also contain method, path, status, and
+duration. Request bodies, query strings, and destination URLs are deliberately excluded.
+
+Every request preserves a valid incoming `X-Correlation-ID` or creates a UUID and returns it. The
+resolver propagates the same ID to the shortener, allowing one request to be followed across both
+services with `docker compose logs`. OpenTelemetry trace/span enrichment will build on this
+context and structured formatter in Phase 3; no trace identifiers are fabricated in this phase.
+
 ## Docker Compose acceptance path
 
 With Docker Desktop running:
@@ -82,10 +94,11 @@ docker compose up --detach --build --wait --wait-timeout 60
 docker compose down --remove-orphans
 ```
 
-Compose publishes shortener on `localhost:8080` and resolver on `localhost:8081`. The smoke
-test creates a mapping, resolves it without following the redirect, verifies `Location`, and
-checks the correlation ID. The resolver's strict echo check proves that the same ID completed
-the internal shortener hop.
+Compose publishes shortener on `localhost:8080` and resolver on `localhost:8081`. The smoke test
+creates a mapping, resolves it without following the redirect, verifies `Location`, and checks the
+correlation ID. It then parses application JSON from `docker compose logs` and proves that the same
+known ID appears in both services. The resolver's strict echo check independently proves that the
+same ID completed the internal shortener hop.
 
 ## Architecture decisions
 
@@ -116,8 +129,7 @@ could justify fail-open behaviour, but adding one now would exceed the assessmen
 - Each `POST` deliberately creates a new code; URL deduplication is not required.
 - In-memory state is lost on restart and must run with one Uvicorn worker.
 - The `/internal` route denotes ownership, not an authenticated security boundary in this phase.
-- Firestore, Terraform, GCP deployment, CI, structured logging, RED metrics, OpenTelemetry,
-  dashboards, alerts, and evidence artifacts are intentionally deferred.
+- Firestore, Terraform, GCP deployment, CI, RED metrics, OpenTelemetry, dashboards, alerts, and
+  final deployed evidence artifacts are intentionally deferred.
 
 Progress against the full assessment is tracked truthfully in `RUBRIC_CHECKLIST.md`.
-

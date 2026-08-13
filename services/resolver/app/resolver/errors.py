@@ -7,7 +7,7 @@ import logging
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-logger = logging.getLogger(__name__)
+from resolver.logging import log_event
 
 
 class UnhandledExceptionMiddleware:
@@ -31,10 +31,15 @@ class UnhandledExceptionMiddleware:
 
         try:
             await self._app(scope, receive, track_response)
-        except Exception:
+        except Exception as exc:
             if response_started:
                 raise
-            logger.exception("Unhandled exception while processing request")
+            log_event(
+                logging.ERROR,
+                "unhandled_application_error",
+                "Unhandled exception while processing request",
+                exception_type=type(exc).__name__,
+            )
             response = JSONResponse(
                 status_code=500,
                 content={"detail": "internal server error"},

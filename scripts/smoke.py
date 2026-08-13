@@ -5,10 +5,48 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import subprocess
 import time
 import uuid
 from email.message import Message
 from urllib.parse import urlsplit
+
+
+def compose_application_logs(service: str) -> list[dict[str, object]]:
+    """Read parseable application JSON entries from one Compose service."""
+
+    completed = subprocess.run(  # noqa: S603 - fixed local validation command, no shell
+        ["docker", "compose", "logs", "--no-color", "--no-log-prefix", service],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    entries: list[dict[str, object]] = []
+    for line in completed.stdout.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and "event" in entry:
+            entries.append(entry)
+    return entries
+
+
+def wait_for_correlated_log(
+    service: str, correlation_id: str, timeout_seconds: float = 10.0
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        matching = [
+            entry
+            for entry in compose_application_logs(service)
+            if entry.get("correlation_id") == correlation_id
+        ]
+        if matching:
+            return matching[-1]
+        time.sleep(0.2)
+    raise RuntimeError(f"no correlated JSON log found for {service}: {correlation_id}")
 
 
 def call(
@@ -87,8 +125,20 @@ def main() -> None:
     assert headers.get("Location") == target_url
     assert headers.get("X-Correlation-ID") == resolve_id
 
-    # Resolver accepts the 302 only if shortener echoed this exact ID on the internal hop.
+    # The 302 proves the strict echo contract; logs prove both processes emitted the same ID.
+    shortener_log = wait_for_correlated_log("shortener", resolve_id)
+    resolver_log = wait_for_correlated_log("resolver", resolve_id)
+    for service, entry in (("shortener", shortener_log), ("resolver", resolver_log)):
+        assert entry["service"] == service
+        assert entry["severity"] in {"INFO", "ERROR"}
+        assert entry["event"]
+        assert entry["timestamp"]
+    combined_logs = json.dumps([shortener_log, resolver_log])
+    assert target_url not in combined_logs
+
     print(f"PASS code={code} correlation_id={resolve_id}")
+    print(f"SHORTENER_LOG {json.dumps(shortener_log, separators=(',', ':'))}")
+    print(f"RESOLVER_LOG {json.dumps(resolver_log, separators=(',', ':'))}")
 
 
 if __name__ == "__main__":

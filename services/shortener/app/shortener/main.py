@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 from shortener.config import Settings
 from shortener.correlation import CorrelationIdMiddleware
 from shortener.errors import UnhandledExceptionMiddleware
+from shortener.logging import log_event
 from shortener.models import (
     CreateUrlRequest,
     CreateUrlResponse,
@@ -18,6 +20,7 @@ from shortener.models import (
     UrlMappingResponse,
 )
 from shortener.repository import InMemoryUrlRepository, UrlRepository
+from shortener.request_logging import RequestLoggingMiddleware
 from shortener.service import (
     CodeAllocationExhausted,
     CodeGenerator,
@@ -55,12 +58,19 @@ def create_app(
     application = FastAPI(title="observable-url-shortener", lifespan=lifespan)
     application.state.ready = False
     application.add_middleware(UnhandledExceptionMiddleware)
+    application.add_middleware(RequestLoggingMiddleware)
     application.add_middleware(CorrelationIdMiddleware)
 
     @application.exception_handler(CodeAllocationExhausted)
     async def allocation_exhausted(
         _request: Request, _error: CodeAllocationExhausted
     ) -> JSONResponse:
+        log_event(
+            logging.ERROR,
+            "short_code_allocation_exhausted",
+            "Short-code allocation attempts exhausted",
+            max_attempts=service_settings.max_code_attempts,
+        )
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": "unable to allocate a short code"},
@@ -87,6 +97,12 @@ def create_app(
     async def create_url(request: Request, payload: CreateUrlRequest) -> CreateUrlResponse:
         service: ShortenerService = request.app.state.shortener_service
         mapping = await service.create_mapping(payload.url)
+        log_event(
+            logging.INFO,
+            "url_mapping_created",
+            "URL mapping created",
+            code=mapping.code,
+        )
         return CreateUrlResponse(
             code=mapping.code,
             short_url=f"{service_settings.resolver_base_url}/{mapping.code}",
@@ -100,7 +116,19 @@ def create_app(
         service: ShortenerService = request.app.state.shortener_service
         mapping = await service.get_mapping(code)
         if mapping is None:
+            log_event(
+                logging.INFO,
+                "url_mapping_lookup_not_found",
+                "URL mapping not found",
+                code=code,
+            )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="code not found")
+        log_event(
+            logging.INFO,
+            "url_mapping_lookup_succeeded",
+            "URL mapping lookup succeeded",
+            code=code,
+        )
         return UrlMappingResponse(code=mapping.code, url=mapping.url)
 
     return application
