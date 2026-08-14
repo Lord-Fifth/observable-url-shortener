@@ -78,8 +78,8 @@ An item is checked only after implementation and direct validation. Deferred ite
 
 ### Evidence
 
-- [ ] Trace screenshot
-- [ ] Dashboard screenshot
+- [x] Trace screenshot
+- [x] Dashboard screenshot
 - [x] Structured log evidence with correlation ID
 
 ## Phase 0-1 definition of done
@@ -227,9 +227,9 @@ as reviewed staged commands rather than one uninterrupted script run.
 - [x] Live Azure health, readiness, create, resolve, correlation, and unknown-code smoke passes
 - [x] Terraform safety validation passes and post-apply plan has no drift
 - [x] README, AGENTS guidance, rubric, KQL, and text evidence are updated
-- [ ] Real trace screenshot saved
-- [ ] Real workbook/dashboard screenshot saved
-- [ ] Real structured-log screenshot saved
+- [x] Real trace screenshot saved
+- [x] Real workbook/dashboard screenshot saved
+- [x] Real structured-log screenshot saved
 
 Phase 5 live evidence: public Linux/amd64 images use immutable tag `phase5-7b3b526275b4`.
 Terraform's complete change set was six additions and three in-place updates with zero destroys;
@@ -237,4 +237,5 @@ the workbook-only recovery added one resource after lowercasing the provider-req
 and the final plan reported no changes across 19 resources. Correlation ID
 `azure-smoke-ef8c5d5a-80cb-4a90-bf7b-1290ea79ebfb` maps from parsed logs to Application Insights
 operation ID `aa0c88bbd5e263bc7688bdffdc05ca86`. Queryable text evidence is stored in `evidence/`.
-All three screenshot items remain open until a human saves authenticated portal captures.
+All three screenshot categories are now supported by real authenticated Azure Portal captures in
+`evidence/`. CI / Phase 6 and uninterrupted deployment-script validation remain incomplete.

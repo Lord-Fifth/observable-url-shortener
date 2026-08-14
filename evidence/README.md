@@ -5,18 +5,20 @@ alert resources. The KQL in `queries/` was validated against the live deployment
 2026. Machine-readable observations for the known request are recorded in
 `phase5-validation.md`.
 
-The three assessment screenshots still require a human authenticated Azure Portal session and
-are deliberately not claimed as complete:
+The authenticated Azure Portal evidence was captured on 14 August 2026 and is stored here using
+the normalized filenames below:
 
-1. **Distributed trace:** open `appi-ous-qafji9` -> Logs, run
-   `queries/distributed-trace.kql`, and use the matching request's transaction details to capture
-   the resolver SERVER -> resolver dependency -> shortener SERVER topology.
-2. **Dashboard:** open `appi-ous-qafji9` -> Workbooks ->
-   **Observable URL Shortener - Production Observability**, select a 24-hour range, and capture
-   the RED and investigation panels.
-3. **Structured log:** open `log-ous-qafji9` -> Logs, run
-   `queries/correlated-logs.kql`, and capture the projected service, event, correlation, trace,
-   span, status, and timestamp columns.
+- `phase5-distributed-trace.png` shows Application Insights end-to-end transaction details with
+  the resolver request, resolver-to-shortener dependency, and shortener request in one topology.
+- `phase5-distributed-trace-kql.png` shows the deployed trace KQL and its three matching rows,
+  including service roles, span IDs, parent IDs, status codes, and one trace ID.
+- `phase5-structured-logs.png` shows Log Analytics parsing deployed Container Apps JSON logs for
+  one known correlation ID across both services, with trace/span IDs, statuses, and revisions.
+- `phase5-observability-workbook-rate-errors.png` shows the Terraform-managed production workbook
+  request-rate panel for both services and the expected empty server-error panel for traffic with
+  no responses >=500.
+- `phase5-observability-workbook-latency.png` shows the workbook's average/maximum latency panel
+  and request totals split by service.
 
-Save real captures here only after checking that no destination URL or other sensitive value is
-visible. Do not manufacture or substitute screenshots.
+Together these files provide the required distributed-trace, dashboard/workbook, and structured
+deployed-log screenshot evidence. The KQL source files remain under `queries/` for reproduction.

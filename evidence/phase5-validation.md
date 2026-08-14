@@ -59,4 +59,16 @@ maximum seconds rather than claiming p95.
   threshold `TotalErrors > 0`.
 - Post-apply Terraform plan: no changes; the 19-resource safety validation passed.
 
-Portal screenshots are intentionally outstanding; see `README.md` in this directory.
+## Azure Portal screenshots
+
+The real authenticated Azure Portal screenshots were captured on 14 August 2026. The complete
+normalized set is:
+
+- `phase5-distributed-trace.png`;
+- `phase5-distributed-trace-kql.png`;
+- `phase5-structured-logs.png`;
+- `phase5-observability-workbook-rate-errors.png`;
+- `phase5-observability-workbook-latency.png`.
+
+They directly demonstrate the distributed topology, its KQL parent/child evidence, deployed
+correlated structured logs, and the production workbook's rate/error and latency/service views.
