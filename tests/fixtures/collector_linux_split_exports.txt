@@ -1,0 +1,49 @@
+otel-collector-1  | 2026-08-14T02:47:10.409Z	info	Traces	{"otelcol.signal": "traces", "resource spans": 1, "spans": 1}
+otel-collector-1  | 2026-08-14T02:47:10.409Z	info	Metrics	{"otelcol.signal": "metrics", "resource metrics": 1, "metrics": 2}
+otel-collector-1  | 2026-08-14T02:47:10.409Z	info	ResourceSpans #0
+otel-collector-1  | Resource attributes:
+otel-collector-1  |      -> service.name: Str(shortener)
+otel-collector-1  | Span #0
+otel-collector-1  |     Trace ID       : 4b7820fe2757a2a5a83217f4160172ca
+otel-collector-1  |     Parent ID      : f69cf87c6db4a637
+otel-collector-1  |     ID             : 50611a8d9ad67e0c
+otel-collector-1  |     Name           : GET /internal/v1/urls/{code}
+otel-collector-1  |     Kind           : Server
+otel-collector-1  |  	{"otelcol.signal": "traces"}
+otel-collector-1  | 2026-08-14T02:47:10.410Z	info	ResourceMetrics #0
+otel-collector-1  | Resource attributes:
+otel-collector-1  |      -> service.name: Str(shortener)
+otel-collector-1  | Metric #0
+otel-collector-1  |      -> Name: url_shortener.http.server.requests
+otel-collector-1  |      -> http.route: Str(/internal/v1/urls/{code})
+otel-collector-1  |      -> http.response.status_code: Int(200)
+otel-collector-1  | Metric #1
+otel-collector-1  |      -> Name: url_shortener.http.server.request.duration
+otel-collector-1  |  	{"otelcol.signal": "metrics"}
+otel-collector-1  | 2026-08-14T02:47:11.048Z	info	Traces	{"otelcol.signal": "traces", "resource spans": 1, "spans": 2}
+otel-collector-1  | 2026-08-14T02:47:11.048Z	info	ResourceSpans #0
+otel-collector-1  | Resource attributes:
+otel-collector-1  |      -> service.name: Str(resolver)
+otel-collector-1  | Span #0
+otel-collector-1  |     Trace ID       : 4b7820fe2757a2a5a83217f4160172ca
+otel-collector-1  |     Parent ID      : 6522ea5cda93dee6
+otel-collector-1  |     ID             : f69cf87c6db4a637
+otel-collector-1  |     Name           : GET
+otel-collector-1  |     Kind           : Client
+otel-collector-1  | Span #1
+otel-collector-1  |     Trace ID       : 4b7820fe2757a2a5a83217f4160172ca
+otel-collector-1  |     Parent ID      : 
+otel-collector-1  |     ID             : 6522ea5cda93dee6
+otel-collector-1  |     Name           : GET /{code}
+otel-collector-1  |     Kind           : Server
+otel-collector-1  |  	{"otelcol.signal": "traces"}
+otel-collector-1  | 2026-08-14T02:47:12.046Z	info	ResourceMetrics #0
+otel-collector-1  | Resource attributes:
+otel-collector-1  |      -> service.name: Str(resolver)
+otel-collector-1  | Metric #0
+otel-collector-1  |      -> Name: url_shortener.http.server.requests
+otel-collector-1  |      -> http.route: Str(/{code})
+otel-collector-1  |      -> http.response.status_code: Int(302)
+otel-collector-1  | Metric #1
+otel-collector-1  |      -> Name: url_shortener.http.server.request.duration
+otel-collector-1  |  	{"otelcol.signal": "metrics"}

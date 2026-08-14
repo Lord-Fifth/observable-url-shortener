@@ -14,6 +14,12 @@ from urllib.parse import urlsplit
 
 TRACE_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 SPAN_ID_PATTERN = re.compile(r"^[0-9a-f]{16}$")
+COLLECTOR_RESOURCE_PATTERN = re.compile(
+    r"^(?:\S+\tinfo\t)?(ResourceSpans|ResourceMetrics) #\d+\s*$",
+    flags=re.MULTILINE,
+)
+COMPOSE_PREFIX_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+\s+\|\s?")
+ExportedSpan = tuple[str, str, str, str]
 
 
 def compose_logs(service: str) -> str:
@@ -26,7 +32,8 @@ def compose_logs(service: str) -> str:
         text=True,
         timeout=15,
     )
-    return completed.stdout
+    streams = [stream.rstrip("\r\n") for stream in (completed.stdout, completed.stderr) if stream]
+    return "\n".join(streams)
 
 
 def compose_application_logs(service: str) -> list[dict[str, object]]:
@@ -104,22 +111,31 @@ def wait_until_ready(base_url: str, timeout_seconds: float = 30.0) -> None:
     raise RuntimeError(f"service did not become ready: {base_url}")
 
 
-def telemetry_events(raw_logs: str, signal: str) -> list[str]:
-    """Split Collector debug output into individual trace or metric exports."""
+def _normalize_compose_prefixes(raw_logs: str) -> str:
+    """Remove optional Linux Compose service prefixes without altering payload lines."""
 
-    events = re.split(
-        r"(?=^\d{4}-\d{2}-\d{2}T.*\tinfo\t(?:Traces|Metrics)\t\{)",
-        raw_logs,
-        flags=re.MULTILINE,
+    return "\n".join(
+        COMPOSE_PREFIX_PATTERN.sub("", line, count=1) for line in raw_logs.splitlines()
     )
-    marker = f'"otelcol.signal": "{signal}"'
-    return [event for event in events if marker in event[:1000]]
 
 
-def exported_spans(event: str, trace_id: str) -> list[tuple[str, str, str]]:
-    """Return (parent ID, span ID, kind) from one detailed trace export."""
+def _collector_events(raw_logs: str, signal: str) -> list[str]:
+    """Return detailed Collector resource payloads independent of exporter headlines."""
 
-    pattern = re.compile(
+    resource_type = {"traces": "ResourceSpans", "metrics": "ResourceMetrics"}[signal]
+    normalized = _normalize_compose_prefixes(raw_logs)
+    matches = list(COLLECTOR_RESOURCE_PATTERN.finditer(normalized))
+    return [
+        normalized[match.start() : matches[index + 1].start() if index + 1 < len(matches) else None]
+        for index, match in enumerate(matches)
+        if match.group(1) == resource_type
+    ]
+
+
+def _exported_spans(raw_logs: str, trace_id: str) -> list[ExportedSpan]:
+    """Return (service, parent ID, span ID, kind) from detailed resource payloads."""
+
+    span_pattern = re.compile(
         rf"Trace ID\s*:\s*{re.escape(trace_id)}\s+"
         r"Parent ID\s*:\s*([0-9a-f]*)\s+"
         r"ID\s*:\s*([0-9a-f]{16})\s+"
@@ -127,7 +143,59 @@ def exported_spans(event: str, trace_id: str) -> list[tuple[str, str, str]]:
         r"Kind\s*:\s*(Server|Client)",
         flags=re.DOTALL,
     )
-    return pattern.findall(event)
+    spans: list[ExportedSpan] = []
+    for event in _collector_events(raw_logs, "traces"):
+        service_match = re.search(r"service\.name:\s*Str\(([^)]+)\)", event)
+        if service_match is None:
+            continue
+        service = service_match.group(1)
+        spans.extend(
+            (service, parent_id, span_id, kind)
+            for parent_id, span_id, kind in span_pattern.findall(event)
+        )
+    return spans
+
+
+def _strict_client_span_id(
+    spans: list[ExportedSpan],
+    resolver_span_id: str,
+    shortener_span_id: str,
+) -> str | None:
+    """Return the resolver CLIENT span only for the exact required three-span chain."""
+
+    resolver_server = next(
+        (
+            span
+            for span in spans
+            if span[0] == "resolver"
+            and span[1] == ""
+            and span[2] == resolver_span_id
+            and span[3] == "Server"
+        ),
+        None,
+    )
+    shortener_server = next(
+        (
+            span
+            for span in spans
+            if span[0] == "shortener" and span[2] == shortener_span_id and span[3] == "Server"
+        ),
+        None,
+    )
+    if resolver_server is None or shortener_server is None:
+        return None
+
+    return next(
+        (
+            span[2]
+            for span in spans
+            if span[0] == "resolver"
+            and span[1] == resolver_span_id
+            and span[3] == "Client"
+            and shortener_server[1] == span[2]
+        ),
+        None,
+    )
 
 
 def wait_for_collector_evidence(
@@ -140,57 +208,20 @@ def wait_for_collector_evidence(
 
     deadline = time.monotonic() + timeout_seconds
     last_reason = "Collector output was empty"
+    observed_spans: dict[tuple[str, str], ExportedSpan] = {}
+    resolver_metrics_ok = False
+    shortener_metrics_ok = False
     while time.monotonic() < deadline:
         raw_logs = compose_logs("otel-collector")
-        trace_events = [
-            event for event in telemetry_events(raw_logs, "traces") if trace_id in event
-        ]
-        resolver_events = [
-            event for event in trace_events if "service.name: Str(resolver)" in event
-        ]
-        shortener_events = [
-            event for event in trace_events if "service.name: Str(shortener)" in event
-        ]
+        for span in _exported_spans(raw_logs, trace_id):
+            observed_spans[(span[0], span[2])] = span
+        client_span_id = _strict_client_span_id(
+            list(observed_spans.values()), resolver_span_id, shortener_span_id
+        )
+        topology_ok = client_span_id is not None
 
-        resolver_spans = [
-            span for event in resolver_events for span in exported_spans(event, trace_id)
-        ]
-        shortener_spans = [
-            span for event in shortener_events for span in exported_spans(event, trace_id)
-        ]
-        resolver_server = next(
-            (
-                span
-                for span in resolver_spans
-                if span[1] == resolver_span_id and span[2] == "Server"
-            ),
-            None,
-        )
-        resolver_client = next(
-            (
-                span
-                for span in resolver_spans
-                if span[0] == resolver_span_id and span[2] == "Client"
-            ),
-            None,
-        )
-        shortener_server = next(
-            (
-                span
-                for span in shortener_spans
-                if span[1] == shortener_span_id and span[2] == "Server"
-            ),
-            None,
-        )
-        topology_ok = bool(
-            resolver_server
-            and resolver_client
-            and shortener_server
-            and shortener_server[0] == resolver_client[1]
-        )
-
-        metric_events = telemetry_events(raw_logs, "metrics")
-        resolver_metrics_ok = any(
+        metric_events = _collector_events(raw_logs, "metrics")
+        resolver_metrics_ok = resolver_metrics_ok or any(
             "service.name: Str(resolver)" in event
             and "Name: url_shortener.http.server.requests" in event
             and "Name: url_shortener.http.server.request.duration" in event
@@ -198,7 +229,7 @@ def wait_for_collector_evidence(
             and "http.response.status_code: Int(302)" in event
             for event in metric_events
         )
-        shortener_metrics_ok = any(
+        shortener_metrics_ok = shortener_metrics_ok or any(
             "service.name: Str(shortener)" in event
             and "Name: url_shortener.http.server.requests" in event
             and "Name: url_shortener.http.server.request.duration" in event
@@ -207,8 +238,8 @@ def wait_for_collector_evidence(
             for event in metric_events
         )
         if topology_ok and resolver_metrics_ok and shortener_metrics_ok:
-            assert resolver_client is not None
-            return resolver_client[1]
+            assert client_span_id is not None
+            return client_span_id
 
         last_reason = (
             f"topology={topology_ok}, resolver_metrics={resolver_metrics_ok}, "
