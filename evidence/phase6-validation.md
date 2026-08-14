@@ -1,7 +1,8 @@
 # Phase 6 delivery validation
 
-Validated 14 August 2026 from baseline commit
-`8f67b7ec70e8ae494544131b3b9374d175fe848d`.
+Validated 14 August 2026 from local baseline commit
+`8f67b7ec70e8ae494544131b3b9374d175fe848d` and successful GitHub Actions commit
+`e888cba9c1f0d29bce6182602cf848828ef53821`.
 
 ## Local and CI-equivalent validation
 
@@ -19,8 +20,28 @@ Validated 14 August 2026 from baseline commit
 
 The GitHub Actions workflow implements the same gates with `contents: read`, no secrets, no Azure
 login, no registry publication, and no Terraform apply. It creates separate Docker archives,
-checksums, and safe build metadata as a seven-day artifact. A real Actions run is intentionally
-not claimed: these changes have not been committed or pushed.
+checksums, and safe build metadata as a seven-day artifact.
+
+## Real GitHub Actions validation
+
+GitHub Actions run `31765838762`, job `94661424809` (`validate-build-artifacts`), completed
+successfully for commit `e888cba9c1f0d29bce6182602cf848828ef53821`. The successful job covered
+the tests, Ruff, Docker Compose configuration, credential-free Terraform validation, production
+image builds and inspection, the real Compose smoke/distributed-trace validation, deployable image
+packaging, and artifact upload.
+
+The uploaded artifact was
+`observable-url-shortener-images-e888cba9c1f0d29bce6182602cf848828ef53821` and contained:
+
+- `shortener-image.tar`
+- `resolver-image.tar`
+- `SHA256SUMS.txt`
+- `BUILD_INFO.txt`
+
+The artifact was independently downloaded and inspected. Independently recalculated SHA256
+checksums for both image archives matched `SHA256SUMS.txt`. `BUILD_INFO.txt` had an empty
+`terraform_version` metadata field; this cosmetic observation does not affect the validated
+Terraform gate, deployable image archives, or their verified checksums.
 
 ## Uninterrupted Azure deployment proof
 

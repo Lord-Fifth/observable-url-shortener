@@ -60,9 +60,9 @@ An item is checked only after implementation and direct validation. Deferred ite
 ### Engineering
 
 - [x] Tests
-- [ ] CI build
-- [ ] CI test
-- [ ] CI deployable artifact
+- [x] CI build
+- [x] CI test
+- [x] CI deployable artifact
 - [x] Deployed secrets handled correctly
 - [x] No hardcoded credentials
 
@@ -249,9 +249,9 @@ All three screenshot categories are now supported by real authenticated Azure Po
 - [x] CI builds and inspects both Linux/amd64 production images and runtime imports
 - [x] CI starts Compose, runs the real smoke/OTel validation, and always cleans up
 - [x] CI packages separate image archives, checksums, and safe build metadata for seven days
-- [ ] Real GitHub Actions test run succeeds - human push checkpoint
-- [ ] Real GitHub Actions image build succeeds - human push checkpoint
-- [ ] Real GitHub Actions artifact is downloaded and verified - human push checkpoint
+- [x] Real GitHub Actions test run succeeds
+- [x] Real GitHub Actions image build succeeds
+- [x] Real GitHub Actions artifact is downloaded and verified
 - [x] Deployment tags and saved-plan names are phase neutral
 - [x] Initial and final Terraform plans pass the 19-resource safety validator
 - [x] Canonical deployment command completes uninterrupted
@@ -266,6 +266,6 @@ Phase 6 local and deployment evidence: 156 tests and both Ruff gates passed; bot
 images and the full Compose smoke/OTel path passed. The uninterrupted orchestrator deployed public
 immutable tag `deploy-54aec4300f56` through an image-only `0 added, 2 changed, 0 destroyed` apply.
 Code `eovnxtAq` resolved after a shortener revision restart, and a final safety-validated plan
-reported no changes across 19 resources. See `evidence/phase6-validation.md`. The three CI master
-criteria and corresponding Phase 6 checks remain open until the user reviews, commits, pushes,
-and verifies a real GitHub Actions run and downloaded artifact.
+reported no changes across 19 resources. GitHub Actions run `31765838762`, job `94661424809`,
+passed for commit `e888cba9c1f0d29bce6182602cf848828ef53821`; its deployable artifact was
+independently inspected and its SHA256 checksums matched. See `evidence/phase6-validation.md`.
