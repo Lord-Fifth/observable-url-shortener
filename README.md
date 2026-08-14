@@ -1,10 +1,11 @@
 # Observable URL Shortener
 
-Phase 6 of Assessment Part 2 implements a deliberately small, observable two-service URL
-shortener. The services communicate only through HTTP, are independently containerised, export
-portable OpenTelemetry signals, and run in a Terraform-managed Azure deployment with durable
-Cosmos DB persistence and Azure-native production observability. Credential-free CI validates
-the complete local stack and packages both deployable images without publishing or deploying.
+This repository is the completed Assessment Part 2 implementation of a deliberately small,
+observable two-service URL shortener. The services communicate only through HTTP, are independently
+containerised, export portable OpenTelemetry signals, and run in a Terraform-managed Azure
+deployment with durable Cosmos DB persistence and Azure-native production observability.
+Credential-free CI validates the complete local stack and packages both deployable images without
+publishing or deploying.
 
 ## Architecture
 
@@ -114,8 +115,11 @@ docker load --input .\resolver-image.tar
 Get-Content .\BUILD_INFO.txt
 ```
 
-The archive checksums are generated and verified during CI. GitHub Actions execution remains a
-human checkpoint after these uncommitted assessment changes are reviewed, committed, and pushed.
+The archive checksums are generated and verified during CI. GitHub Actions run `31765838762`
+succeeded for commit `e888cba9c1f0d29bce6182602cf848828ef53821`; its deployable artifact was
+independently downloaded and inspected, and independently recalculated checksums matched
+`SHA256SUMS.txt`. The later documentation commit
+`380f2975fb3d7ab85702bcd9ab7f90120114c264` also produced a successful CI run.
 
 ## Local observability
 
@@ -374,17 +378,17 @@ shortener revision restart, and the final safety-validated detailed plan reporte
 An independent post-script smoke created and resolved `GBRrBkfg`, preserved correlation ID
 `azure-smoke-ffc6b862-5a9e-43e9-be4f-354319cab4c4`, returned the exact target Location, and
 confirmed unknown-code `404`. The full safe command/output summary is in
-`evidence/phase6-validation.md`. The GitHub workflow is implemented and mirrored locally, but its
-three master CI criteria remain open until a human-reviewed commit is pushed and a real Actions
-run produces the downloadable artifact.
+`evidence/phase6-validation.md`. GitHub Actions run `31765838762` then passed every CI gate and
+produced the independently verified deployable image artifact; the subsequent documentation
+commit `380f2975fb3d7ab85702bcd9ab7f90120114c264` also passed CI.
 
-## Current local limits
+## Known limits and trade-offs
 
 - Each `POST` deliberately creates a new code; URL deduplication is not required.
 - In-memory state is lost on restart and must run with one Uvicorn worker.
-- The `/internal` route denotes ownership, not an authenticated security boundary in this phase.
-- The CI workflow is implemented and locally mirrored, but its master rubric items stay open until
-  a real GitHub Actions run succeeds after human review and push.
+- The `/internal` route denotes ownership, not an authenticated security boundary in the assessment
+  deployment.
 - Azure Portal screenshots and reproducible KQL/text evidence are present under `evidence/`.
 
-Progress against the full assessment is tracked truthfully in `RUBRIC_CHECKLIST.md`.
+Final Part 2 status is tracked in `RUBRIC_CHECKLIST.md`; Part 1 is an external submission
+deliverable and is not validated from this repository.

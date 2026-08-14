@@ -1,16 +1,20 @@
 # Master assessment checklist
 
-An item is checked only after implementation and direct validation. Deferred items remain open.
+An item is checked only after implementation and direct validation. Unchecked items lack directly
+verifiable repository evidence.
 
-## Part 1 - Context-window memo (NOT STARTED)
+## Part 1 - Context-window memo (external submission deliverable; final page layout validated separately)
 
-- [ ] <=600 words - NOT STARTED
-- [ ] Design-thinking framing - NOT STARTED
-- [ ] Mechanics - NOT STARTED
-- [ ] Trade-offs - NOT STARTED
-- [ ] Recommendation - NOT STARTED
-- [ ] Validation approach - NOT STARTED
-- [ ] Final one-page deliverable - NOT STARTED
+Part 1 is outside this repository's scope. These items remain unchecked because the final one-page
+artifact is not present here; its submission status must be validated separately.
+
+- [ ] <=600 words
+- [ ] Design-thinking framing
+- [ ] Mechanics
+- [ ] Trade-offs
+- [ ] Recommendation
+- [ ] Validation approach
+- [ ] Final one-page deliverable
 
 ## Part 2 - System
 

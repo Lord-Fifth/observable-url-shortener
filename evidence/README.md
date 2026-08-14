@@ -23,6 +23,7 @@ the normalized filenames below:
 Together these files provide the required distributed-trace, dashboard/workbook, and structured
 deployed-log screenshot evidence. The KQL source files remain under `queries/` for reproduction.
 
-`phase6-validation.md` records the later credential-free CI-equivalent gates and uninterrupted
-Azure deployment-script proof, including immutable image digests, image-only apply scope, live
-smoke/durability identifiers, final zero drift, and the deliberately deferred real Actions run.
+`phase6-validation.md` records the credential-free CI gates and uninterrupted Azure
+deployment-script proof, including immutable image digests, image-only apply scope, live
+smoke/durability identifiers, final zero drift, successful GitHub Actions run `31765838762`, and
+independent verification of the deployable artifact and its SHA256 checksums.
