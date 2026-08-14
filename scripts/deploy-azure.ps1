@@ -111,7 +111,10 @@ Write-Host "Azure region: $Location"
 Invoke-Native docker info --format "{{.ServerVersion}}"
 
 if (-not $SkipLocalValidation) {
-    Invoke-Native $python -m pytest -q -p no:cacheprovider
+    & $python -m pytest -q -p no:cacheprovider
+    if ($LASTEXITCODE -ne 0) {
+        throw "Local pytest validation failed with exit code $LASTEXITCODE"
+    }
     Invoke-Native $python -m ruff check .
     Invoke-Native $python -m ruff format --check .
     Invoke-Native docker compose config --quiet
@@ -120,6 +123,9 @@ if (-not $SkipLocalValidation) {
 if (-not $ImageTag) {
     $files = Get-NativeOutput git ls-files --cached --others --exclude-standard
     $fingerprints = foreach ($file in ($files -split "`n" | Sort-Object)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $file))) {
+            continue
+        }
         $hash = Get-NativeOutput git hash-object -- $file
         "$file`0$hash"
     }
@@ -131,7 +137,7 @@ if (-not $ImageTag) {
     finally {
         Remove-Item -LiteralPath $fingerprintFile -Force
     }
-    $ImageTag = "phase5-$($snapshotHash.Substring(0, 12))"
+    $ImageTag = "deploy-$($snapshotHash.Substring(0, 12))"
 }
 if ($ImageTag -notmatch "^[0-9a-z][0-9a-z._-]{6,127}$") {
     throw "ImageTag must be a lowercase immutable container tag."
@@ -158,8 +164,8 @@ if (-not (Test-PublicGhcrImage $shortenerImage) -or -not (Test-PublicGhcrImage $
 }
 
 Invoke-Native terraform "-chdir=$infraDirectory" init
-$planName = "phase5.tfplan"
-Invoke-Native terraform "-chdir=$infraDirectory" plan -out=$planName "-var=image_tag=$ImageTag" "-var=location=$Location"
+$planName = "deploy.tfplan"
+Invoke-Native terraform "-chdir=$infraDirectory" plan "-out=$planName" "-var=image_tag=$ImageTag" "-var=location=$Location"
 Invoke-Native $python (Join-Path $PSScriptRoot "validate-terraform-plan.py") (Join-Path $infraDirectory $planName) --infra-directory $infraDirectory
 Invoke-Native terraform "-chdir=$infraDirectory" apply $planName
 
@@ -177,4 +183,30 @@ $revision = Get-NativeOutput az containerapp revision list --resource-group $out
 Invoke-Native az containerapp revision restart --resource-group $outputs.resource_group_name.value --name $outputs.shortener_app_name.value --revision $revision
 Invoke-Native $python (Join-Path $PSScriptRoot "smoke-azure.py") --shortener-url $shortenerUrl --resolver-url $resolverUrl --existing-code $smoke.code --expected-target $smoke.target_url
 
-Write-Host "Azure deployment and post-restart durability validation passed."
+$noDriftPlanName = "deploy-no-drift.tfplan"
+& terraform "-chdir=$infraDirectory" plan -detailed-exitcode "-out=$noDriftPlanName" "-var=image_tag=$ImageTag" "-var=location=$Location"
+$noDriftExitCode = $LASTEXITCODE
+if ($noDriftExitCode -eq 1) {
+    throw "Final Terraform no-drift plan failed."
+}
+Invoke-Native $python (Join-Path $PSScriptRoot "validate-terraform-plan.py") (Join-Path $infraDirectory $noDriftPlanName) --infra-directory $infraDirectory
+if ($noDriftExitCode -eq 2) {
+    throw "Final Terraform plan detected drift after deployment. The saved plan was safety-validated but was not applied."
+}
+
+# The literal legacy names clean up interrupted pre-Phase-6 quoting regressions safely.
+$legacyLiteralPlanNames = @(
+    ([string][char]36 + "planName")
+    ([string][char]36 + "noDriftPlanName")
+)
+foreach ($savedPlan in @($planName, $noDriftPlanName) + $legacyLiteralPlanNames) {
+    $savedPlanPath = [System.IO.Path]::GetFullPath((Join-Path $infraDirectory $savedPlan))
+    if ([System.IO.Path]::GetDirectoryName($savedPlanPath) -ne [System.IO.Path]::GetFullPath($infraDirectory)) {
+        throw "Refusing to remove a saved plan outside the Terraform directory: $savedPlanPath"
+    }
+    if (Test-Path -LiteralPath $savedPlanPath) {
+        Remove-Item -LiteralPath $savedPlanPath -Force
+    }
+}
+
+Write-Host "Azure deployment, post-restart durability, and final no-drift validation passed."

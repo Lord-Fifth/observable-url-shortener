@@ -1,6 +1,6 @@
 # Azure infrastructure
 
-This Terraform root creates the complete Phase 5 application infrastructure in Australia East:
+This Terraform root creates the complete application infrastructure in Australia East:
 one resource group, one Consumption Container Apps environment, two independently identified
 Container Apps, one free-tier Cosmos DB for NoSQL account, and one Azure-native observability
 stack. The Cosmos database has 1000 RU/s shared provisioned throughput and two containers with no

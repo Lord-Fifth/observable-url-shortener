@@ -90,6 +90,15 @@ defensible p95. Preserve the dashboard -> service/operation -> distributed trace
 JSON log investigation workflow. Managed Grafana and the Container Apps managed OTel agent are
 not part of this architecture.
 
+Phase 6 adds credential-free GitHub Actions validation and deployable image archives. CI has only
+`contents: read`, never pushes images, never signs in to Azure, never applies Terraform, and never
+uses repository secrets. It must run pytest, both Ruff checks, Compose and credential-free
+Terraform validation, explicit production-image inspection, and the real Compose smoke path.
+Artifacts contain separate Docker archives plus checksums and safe build metadata, with seven-day
+retention. The Azure deployment orchestrator uses `deploy-<content-hash>` tags, validates its
+initial and final saved plans, requires final detailed-exit-code zero drift, and never applies the
+final no-drift plan.
+
 The AzureRM provider must keep explicit narrow registration for `Microsoft.App`,
 `Microsoft.DocumentDB`, `Microsoft.Insights`, and `Microsoft.OperationalInsights`; do not replace
 it with broad provider registration or portal/CLI click-ops. Both runtime manifests must retain a
@@ -100,8 +109,8 @@ the same user-assigned identity attached to that app, and keep the Consumption w
 explicit so provider refreshes do not introduce unrelated drift.
 
 Until a later explicit phase, do not add another telemetry backend, managed Grafana, an Azure
-hosted OTel Collector, GitHub Actions, Redis, Service Bus, Kubernetes, authentication, a UI, or
-Assessment Part 1. Do not introduce GCP, Cloud Run, Firestore, ACR, AKS, App Service, VNet, private
+hosted OTel Collector, Redis, Service Bus, Kubernetes, authentication, a UI, or Assessment Part 1.
+Do not introduce GCP, Cloud Run, Firestore, ACR, AKS, App Service, VNet, private
 endpoints, API Management, Front Door, or other resources outside the existing Terraform root.
 Authenticated portal screenshots remain human work and must never be claimed without real files.
 

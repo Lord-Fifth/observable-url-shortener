@@ -61,3 +61,32 @@ def test_each_container_app_explicitly_selects_its_own_managed_identity() -> Non
         SERVICE_NAMES
     )
     assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in container_apps
+
+
+def test_deployment_orchestrator_uses_phase_neutral_immutable_artifacts() -> None:
+    deployment_script = (REPOSITORY_ROOT / "scripts" / "deploy-azure.ps1").read_text()
+
+    assert "& $python -m pytest -q -p no:cacheprovider" in deployment_script
+    assert "Local pytest validation failed" in deployment_script
+    assert "Test-Path -LiteralPath (Join-Path $repositoryRoot $file)" in deployment_script
+    assert '$ImageTag = "deploy-$($snapshotHash.Substring(0, 12))"' in deployment_script
+    assert '$planName = "deploy.tfplan"' in deployment_script
+    assert 'plan "-out=$planName"' in deployment_script
+    assert '$noDriftPlanName = "deploy-no-drift.tfplan"' in deployment_script
+    assert 'plan -detailed-exitcode "-out=$noDriftPlanName"' in deployment_script
+    assert "phase4" not in deployment_script
+    assert "phase5" not in deployment_script
+
+
+def test_deployment_orchestrator_requires_validated_final_no_drift_plan() -> None:
+    deployment_script = (REPOSITORY_ROOT / "scripts" / "deploy-azure.ps1").read_text()
+
+    assert "plan -detailed-exitcode" in deployment_script
+    assert "Final Terraform no-drift plan failed." in deployment_script
+    assert "Final Terraform plan detected drift after deployment." in deployment_script
+    assert deployment_script.count("validate-terraform-plan.py") == 2
+    assert "$legacyLiteralPlanNames = @(" in deployment_script
+    assert '([string][char]36 + "planName")' in deployment_script
+    assert '([string][char]36 + "noDriftPlanName")' in deployment_script
+    assert "Remove-Item -LiteralPath $savedPlanPath -Force" in deployment_script
+    assert "terraform apply $noDriftPlanName" not in deployment_script

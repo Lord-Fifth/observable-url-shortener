@@ -1,9 +1,10 @@
 # Observable URL Shortener
 
-Phase 5 of Assessment Part 2 implements a deliberately small, observable two-service URL
+Phase 6 of Assessment Part 2 implements a deliberately small, observable two-service URL
 shortener. The services communicate only through HTTP, are independently containerised, export
 portable OpenTelemetry signals, and run in a Terraform-managed Azure deployment with durable
-Cosmos DB persistence and Azure-native production observability.
+Cosmos DB persistence and Azure-native production observability. Credential-free CI validates
+the complete local stack and packages both deployable images without publishing or deploying.
 
 ## Architecture
 
@@ -37,6 +38,26 @@ are accepted; invalid requests return `422`.
 
 Resolve with `GET /{code}` on the resolver. A known code returns `302`; an unknown code
 returns `404`; a failed or contract-violating shortener response returns `503`.
+
+The validated public origins are:
+
+- shortener: `https://ous-shortener-qafji9.happybay-4a23884e.australiaeast.azurecontainerapps.io`;
+- resolver: `https://ous-resolver-qafji9.happybay-4a23884e.australiaeast.azurecontainerapps.io`.
+
+The shortener's interactive contract is available at its `/docs` path, and the resolver exposes
+its own contract at its `/docs` path. A bare `GET /` returning `404` is normal: there is no landing
+page or UI, and redirect codes are required on the resolver route.
+
+For example, create a live mapping with PowerShell and inspect the returned resolver URL:
+
+```powershell
+$shortener = "https://ous-shortener-qafji9.happybay-4a23884e.australiaeast.azurecontainerapps.io"
+$created = Invoke-RestMethod -Method Post -Uri "$shortener/v1/urls" `
+  -ContentType "application/json" -Headers @{ "X-Correlation-ID" = "readme-example" } `
+  -Body '{"url":"https://example.com/assessment"}'
+$created
+curl.exe -i $created.short_url -H "X-Correlation-ID: readme-example"
+```
 
 ## Local setup
 
@@ -72,6 +93,29 @@ an `.env` file.
 
 The integration test starts both ASGI applications and crosses the same HTTP adapter used in
 production. Resolver unit tests mock only the HTTP boundary and never import shortener code.
+
+## Continuous integration and deployable artifacts
+
+`.github/workflows/ci.yml` runs on pushes and pull requests to `main`, plus manual dispatch. It
+uses Python 3.12.10 and Terraform 1.15.8 to run the full pytest and Ruff gates, validate Compose
+and Terraform without cloud credentials, build and inspect both Linux/amd64 production images,
+and run the real Compose smoke/OTel validation. Cleanup runs even after a failed smoke test.
+
+CI deliberately receives read-only repository permission and has no Azure login, package-write
+permission, or repository secrets. It does not push images or deploy infrastructure. Instead it
+uploads two separate Docker image archives, `SHA256SUMS.txt`, and safe `BUILD_INFO.txt` metadata as
+one seven-day workflow artifact. After downloading and verifying the artifact, load the images
+without rebuilding:
+
+```powershell
+Get-Content .\SHA256SUMS.txt
+docker load --input .\shortener-image.tar
+docker load --input .\resolver-image.tar
+Get-Content .\BUILD_INFO.txt
+```
+
+The archive checksums are generated and verified during CI. GitHub Actions execution remains a
+human checkpoint after these uncommitted assessment changes are reviewed, committed, and pushed.
 
 ## Local observability
 
@@ -138,13 +182,17 @@ installing the Azure packages does not cause local authentication attempts.
 
 ## Architecture decisions
 
-### ADR-001: Keep mapping ownership in the shortener
+### ADR-001: Preserve the HTTP service boundary and event ownership
 
 The shortener owns mapping lifecycle and storage. The resolver owns the latency-sensitive
 redirect path and its event records, but looks mappings up through the internal REST contract.
 This adds one network hop and couples redirect availability to the shortener; in exchange it
 prevents shared-database coupling, preserves independent deployment, and creates the service
 span required by the assessment.
+
+The resolver records its redirect event before returning `302`; a failed write returns a generic
+`503` rather than silently losing an event. A future durable asynchronous event path could justify
+fail-open behaviour, but adding one here would weaken the small, explicit ownership boundary.
 
 ### ADR-002: Use repository protocols with memory and Cosmos adapters
 
@@ -155,11 +203,16 @@ key/document access pattern and free tier without relational joins. Compared wit
 avoids schema and server operations, at the cost of Cosmos-specific partitioning and consistency
 decisions. Redirect events omit destination URLs and use their own `/code` container.
 
-### ADR-003: Fail closed when redirect-event recording fails
+### ADR-003: Deploy to Azure Container Apps with secretless, narrow data access
 
-The resolver records the redirect event before returning `302`. If recording fails, it returns
-a generic `503` instead of silently losing an event. A future durable asynchronous event path
-could justify fail-open behaviour, but adding one now would exceed the assessment scope.
+Azure Container Apps runs the existing Docker images directly, provides HTTPS ingress,
+scale-to-zero Consumption compute, and app-name service discovery with little platform operation.
+Public GHCR avoids the cost and identity plumbing of ACR, but image packages must be explicitly
+public. Terraform creates separate user-assigned identities: shortener is a Cosmos data contributor
+only on `url_mappings`, while resolver is scoped only to `redirect_events`. Applications use
+`DefaultAzureCredential`; database keys and connection strings are disabled. Both public ingresses
+are an assessment usability trade-off: `/internal` is not an authenticated production boundary,
+and production would restrict it with identity/network policy. Auth is deliberately out of scope.
 
 ### ADR-004: Keep portable telemetry explicit and lifecycle-owned
 
@@ -172,16 +225,14 @@ on those same providers, authenticated with the service's existing managed ident
 auto-configuration replacing providers or duplicating instrumentation. The cost is a small
 intentional telemetry-module duplication so each service remains independently buildable.
 
-### ADR-005: Deploy to Azure Container Apps with secretless, narrow data access
+### ADR-005: Prioritise production hardening after measured need
 
-Azure Container Apps runs the existing Docker images directly, provides HTTPS ingress,
-scale-to-zero Consumption compute, and app-name service discovery with little platform operation.
-Public GHCR avoids the cost and identity plumbing of ACR, but image packages must be explicitly
-public. Terraform creates separate user-assigned identities: shortener is a Cosmos data contributor
-only on `url_mappings`, while resolver is scoped only to `redirect_events`. Applications use
-`DefaultAzureCredential`; database keys and connection strings are disabled. Both public ingresses
-are an assessment usability trade-off: `/internal` is not an authenticated production boundary,
-and production would restrict it with identity/network policy. Auth is deliberately out of scope.
+With more time I would move Terraform state to a locked remote backend, restrict the shortener's
+internal endpoint using service identity/network policy, add sampling and retention budgets from
+observed traffic, route alerts through an environment-owned action group, and validate dashboard
+and alert queries in CI. I would separate evidence traffic from user traffic with a bounded
+non-identifying deployment annotation, never request IDs as metric dimensions. These are conscious
+next steps, not omissions to hide inside this time-boxed implementation.
 
 ## Azure architecture
 
@@ -231,9 +282,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\deploy-azure.ps1
 ```
 
 The two GitHub Packages must be Public so Container Apps can pull them without registry secrets.
-The orchestrator validates locally, derives an immutable source-snapshot tag, builds and pushes
-both images, initializes/plans/validates/applies Terraform, prints HTTPS outputs, runs live smoke,
-restarts the shortener revision, and resolves the same mapping again as a durability proof. Local
+The orchestrator validates locally, derives a phase-neutral immutable `deploy-<content-hash>` tag,
+builds and pushes both images, initializes/plans/safety-validates/applies Terraform, prints HTTPS
+outputs, runs live smoke, restarts the shortener revision, and resolves the same mapping again as
+a durability proof. It finishes with a second safety-validated detailed-exit-code plan, requires
+zero drift, and removes only its exact saved plan files; it never applies that second plan. Local
 Terraform state is deliberately accepted for the assessment and excluded from Git.
 
 ### Validated Phase 4 deployment
@@ -290,9 +343,8 @@ native workspace, Application Insights, workbook, and alert meet the assessment 
 second hosted backend, while direct exporters preserve the explicitly lifecycle-owned providers,
 HTTPX client instrumentation, RED instruments, and local Collector workflow.
 
-The reproducible KQL and real text evidence live in `evidence/`. Portal trace, workbook, and
-structured-log screenshot instructions are in `evidence/README.md`; screenshot criteria remain
-open until a human captures the actual portal views.
+The reproducible KQL, text evidence, and real authenticated Portal screenshots live in
+`evidence/`; `evidence/README.md` maps each normalized file to the criterion it proves.
 
 ### Validated Phase 5 deployment
 
@@ -311,21 +363,28 @@ and trace ID. Both services produced request and duration custom metrics. The se
 was correctly absent because no >=500 validation response occurred; real 404 traffic appeared
 only in the request counter.
 
-### What I would do differently with more time
+### Validated Phase 6 delivery
 
-For a longer-lived system I would move Terraform state to a locked remote backend, restrict the
-shortener's internal endpoint using service identity/network policy, add deliberate sampling and
-data-retention budgets from observed traffic, route alerts through an environment-owned action
-group, and validate dashboard/alert queries in CI. I would also separate evidence traffic from
-user traffic with a bounded non-identifying dimension or deployment annotation, rather than add
-request IDs to metrics. None is justified inside this time-boxed assessment before CI Phase 6.
+The phase-neutral deployment orchestrator completed uninterrupted on 14 August 2026 and deployed
+public immutable Linux/amd64 images tagged `deploy-54aec4300f56`. Its safety-validated plan changed
+only the two Container App image fields in place (`0 added, 2 changed, 0 destroyed`). Both new
+revisions reached Running/Succeeded, the complete cloud smoke passed, code `eovnxtAq` survived a
+shortener revision restart, and the final safety-validated detailed plan reported no changes.
+
+An independent post-script smoke created and resolved `GBRrBkfg`, preserved correlation ID
+`azure-smoke-ffc6b862-5a9e-43e9-be4f-354319cab4c4`, returned the exact target Location, and
+confirmed unknown-code `404`. The full safe command/output summary is in
+`evidence/phase6-validation.md`. The GitHub workflow is implemented and mirrored locally, but its
+three master CI criteria remain open until a human-reviewed commit is pushed and a real Actions
+run produces the downloadable artifact.
 
 ## Current local limits
 
 - Each `POST` deliberately creates a new code; URL deduplication is not required.
 - In-memory state is lost on restart and must run with one Uvicorn worker.
 - The `/internal` route denotes ownership, not an authenticated security boundary in this phase.
-- CI and authenticated Azure Portal screenshots are intentionally deferred. Text/KQL production
-  evidence is present, but screenshot checklist items remain incomplete until real captures exist.
+- The CI workflow is implemented and locally mirrored, but its master rubric items stay open until
+  a real GitHub Actions run succeeds after human review and push.
+- Azure Portal screenshots and reproducible KQL/text evidence are present under `evidence/`.
 
 Progress against the full assessment is tracked truthfully in `RUBRIC_CHECKLIST.md`.

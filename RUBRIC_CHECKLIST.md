@@ -190,7 +190,7 @@ An item is checked only after implementation and direct validation. Deferred ite
 - [x] Redirect-event persistence directly demonstrated
 - [x] Local Docker and Compose workflow remains green
 - [x] Existing local OpenTelemetry workflow remains green
-- [ ] Deployment script works end to end
+- [x] Deployment script works end to end
 - [x] README includes Azure architecture and deployment instructions
 - [x] Azure/Cosmos/identity/GHCR ADR trade-offs are documented
 - [x] Rubric is updated truthfully
@@ -201,8 +201,7 @@ and the post-apply plan had zero drift. Both HTTPS applications became healthy. 
 created and resolved code `qXJLudH2`, preserved correlation IDs, and returned the expected `404`.
 The mapping survived a shortener revision restart, and managed-identity reads after resolver and
 shortener restarts directly showed the mapping plus three redirect events in their separately
-scoped Cosmos containers. The deployment-script item remains open because recovery was performed
-as reviewed staged commands rather than one uninterrupted script run.
+scoped Cosmos containers. Phase 6 subsequently demonstrated the deployment script uninterrupted.
 
 ## Phase 5 definition of done
 
@@ -238,4 +237,35 @@ and the final plan reported no changes across 19 resources. Correlation ID
 `azure-smoke-ef8c5d5a-80cb-4a90-bf7b-1290ea79ebfb` maps from parsed logs to Application Insights
 operation ID `aa0c88bbd5e263bc7688bdffdc05ca86`. Queryable text evidence is stored in `evidence/`.
 All three screenshot categories are now supported by real authenticated Azure Portal captures in
-`evidence/`. CI / Phase 6 and uninterrupted deployment-script validation remain incomplete.
+`evidence/`.
+
+## Phase 6 definition of done
+
+- [x] Required clean baseline commit and tool versions established
+- [x] CI triggers cover pushes, pull requests to `main`, and manual dispatch
+- [x] CI uses read-only contents permission, no secrets, no Azure login, and no deployment
+- [x] CI pins Python 3.12.10 and Terraform 1.15.8
+- [x] CI runs pytest, Ruff, Compose configuration, and credential-free Terraform validation
+- [x] CI builds and inspects both Linux/amd64 production images and runtime imports
+- [x] CI starts Compose, runs the real smoke/OTel validation, and always cleans up
+- [x] CI packages separate image archives, checksums, and safe build metadata for seven days
+- [ ] Real GitHub Actions test run succeeds - human push checkpoint
+- [ ] Real GitHub Actions image build succeeds - human push checkpoint
+- [ ] Real GitHub Actions artifact is downloaded and verified - human push checkpoint
+- [x] Deployment tags and saved-plan names are phase neutral
+- [x] Initial and final Terraform plans pass the 19-resource safety validator
+- [x] Canonical deployment command completes uninterrupted
+- [x] Apply changes only the two Container App images in place
+- [x] Live health, readiness, creation, 302, Location, correlation, and 404 checks pass
+- [x] Mapping and redirect-event persistence remain valid through the revision lifecycle
+- [x] Final detailed Terraform plan proves zero drift and is never applied
+- [x] Deployment script removes its exact saved plan files after success
+- [x] README, AGENTS guidance, ADRs, rubric, and safe Phase 6 evidence are updated
+
+Phase 6 local and deployment evidence: 156 tests and both Ruff gates passed; both production
+images and the full Compose smoke/OTel path passed. The uninterrupted orchestrator deployed public
+immutable tag `deploy-54aec4300f56` through an image-only `0 added, 2 changed, 0 destroyed` apply.
+Code `eovnxtAq` resolved after a shortener revision restart, and a final safety-validated plan
+reported no changes across 19 resources. See `evidence/phase6-validation.md`. The three CI master
+criteria and corresponding Phase 6 checks remain open until the user reviews, commits, pushes,
+and verifies a real GitHub Actions run and downloaded artifact.
